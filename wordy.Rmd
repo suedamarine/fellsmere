@@ -1,0 +1,3525 @@
+---
+title: "Fellsmere AES Supporting Material"
+author: "AES Technical"
+date: "`r Sys.Date()`"
+output:
+  bookdown::word_document2:
+     fig_caption: yes
+     number_sections: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r libraries}
+# import libraries
+library(tidyverse)
+library(broom)
+library(flextable)
+library(kableExtra)
+library(officer)
+library(knitr)
+```
+
+``` {r initial_mass}
+# define parameters
+bw_0 <- 0.07
+```
+
+# Deliverables:
+
+* Develop growth model
+* Develop production plan
+* Perform system mass balance equations
+* Develop prototype system
+
+***
+
+# Growth Modeling
+
+Growth model based on data supplied from SyAqua Americas 95^th^ st.facility.
+
+**_Litopenaeus vannamei_** growth characteristics:
+
+``` {r growth_data}
+
+# import data
+shrimp_growout <- read.csv("data/shrimp_growout.csv")
+
+# find weight gain for weight midpoint
+shrimp.growth <- shrimp_growout %>%
+  mutate(wt.mid = (wt_2 + wt_1) / 2,
+         g.gain.day = (wt_2 - wt_1) / (t_2 - t_1),
+         geometric.mid = sqrt(wt_1 * wt_2))
+```
+
+
+```{r growth_model}
+
+# try base code log-log relationship - looks good!
+shrimp.fit.twinlog <- lm(log(g.gain.day) ~ log(wt.mid), data = shrimp.growth)
+
+# calculate coefficients for growth curve bw_1 = [bw_0^c_1 + c_2 * days]^c_4
+c_1 <- 1 - shrimp.fit.twinlog$coef[2]
+c_2 <- c_1 * exp(shrimp.fit.twinlog$coef[1])
+c_4 <- 1 / c_1
+
+# try base code log-log relationship for geometric weight
+shrimp.geometric.twinlog <- lm(log(g.gain.day) ~ log(geometric.mid), data = shrimp.growth)
+
+# calculate coefficients for growth curve bw_1 = [bw_0^c_1 + c_2 * days]^c_4
+geometric_c_1 <- 1 - shrimp.geometric.twinlog$coef[2]
+geometric_c_2 <- c_1 * exp(shrimp.geometric.twinlog$coef[1])
+geometric_c_4 <- 1 / geometric_c_1
+```
+
+```{r GrowthModelPlot, fig.cap = "Daily growth rate by mass - datapoints from SyAqua 95^th^st (blue - arithmetric model, black - geometric model).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# set some colours
+cols <- c("quarantine" = "#bdc9e1", "nursery" = "#74a9cf", "juvenile" = "#2b8cbe", "growout" = "#045a8d")
+
+# plot relationship between weight and grams gained per day 
+p_shrimp_gain <- shrimp.growth %>%
+  ggplot(aes(wt.mid, g.gain.day, color = phase)) +
+  geom_point() +
+  scale_color_manual(name = "Phase",
+  labels = c("quarantine" = "Quarantine", "nursery" = "Nursery", "juvenile" = "Juvenile", "growout" = "Growout"),
+  values = c(cols)) +
+  stat_function(fun = function(x) exp(shrimp.fit.twinlog$coef[1]) * x^shrimp.fit.twinlog$coef[2], color = 'dodgerblue') +
+  stat_function(fun = function(x) exp(shrimp.geometric.twinlog$coef[1]) * x^shrimp.geometric.twinlog$coef[2], color = 'black') +
+  xlab("Mass (g)") +
+  ylab("Daily mass gain (g/shrimp/day)") +
+  theme_minimal()
+
+p_shrimp_gain
+```
+
+***
+
+From the growth model, an estimate of white-leg shrimp body mass - as a function of time from introduction - can be calculated.  
+\n
+
+``` {r bodyweight}
+
+# estimate body-weight over time
+bodyweight <- tibble(day = seq(1,180,1)) %>%
+  mutate(bw = (bw_0^c_1 + c_2 * day)^c_4)
+
+# import fellsmere growth data
+fellsmere.growth <- read.csv("data/fellsmere_growth.csv")
+
+# create model to incorporate fellsmere growth data
+bodyweight.model <- bodyweight %>%
+  mutate(data.source = "model") %>%
+  bind_rows(fellsmere.growth)
+```
+
+``` {r ShrimpMassPlot, fig.cap = "Estimated shrimp mass at time from introduction (blue - arithmetic model, black - geometric model).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# shrimp growth model compared to fellsmere
+shrimp.model.plot <- 
+  bodyweight.model %>%
+  ggplot(aes(day, bw, color = data.source)) +
+  geom_line() +
+  stat_function(fun = function(x) (bw_0^geometric_c_1 + geometric_c_2 * x)^geometric_c_4, color = 'black') +
+  labs(x = "Day", y = "Mass (g)") +
+  scale_color_discrete(name = "Data source", labels = c("Fellsmere", "Model")) +
+  theme_minimal()
+
+shrimp.model.plot
+```
+
+``` {r target_mass}
+
+# define parameters
+quarantine.max <- 1.2
+nursery.max <- 3
+juvenile.max <- 10
+growout.max <- 32
+nursery.harvest <- 5
+
+shrimp.1_2.g <- ceiling(which(abs(bodyweight$bw - quarantine.max) == min(abs(bodyweight$bw - quarantine.max))))
+
+shrimp.3.g <- ceiling(which(abs(bodyweight$bw - nursery.max) == min(abs(bodyweight$bw - nursery.max))))
+
+shrimp.5.g <- ceiling(which(abs(bodyweight$bw - nursery.harvest) == min(abs(bodyweight$bw - nursery.harvest))))
+
+shrimp.10.g <- ceiling(which(abs(bodyweight$bw - juvenile.max) == min(abs(bodyweight$bw - juvenile.max))))
+
+shrimp.25.g <- ceiling(which(abs(bodyweight$bw - 25) == min(abs(bodyweight$bw - 25))))
+
+shrimp.32.g <- ceiling(which(abs(bodyweight$bw - growout.max) == min(abs(bodyweight$bw - growout.max))))
+```
+
+Projected day to attain key bodyweights:
+
+* Estimated growth day for `r quarantine.max`g shrimp: Day `r shrimp.1_2.g`
+* Estimated growth day for `r nursery.max`g shrimp: Day `r shrimp.3.g`
+* Estimated growth day for `r nursery.harvest`g shrimp: Day `r shrimp.5.g`
+* Estimated growth day for `r juvenile.max`g shrimp: Day `r shrimp.10.g`
+* Estimated growth day for `r growout.max`g shrimp: Day `r shrimp.32.g`
+
+***
+
+# Production Plan
+
+``` {r harvest_targets}
+
+harvest.95.1 <- 2200
+harvest.95.2 <- 600
+
+harvest.primo.1 <- 1200
+harvest.primo.2 <- 1000
+harvest.primo.3 <- 600
+
+harvest.101.1 <- 1200
+harvest.101.2 <- 600
+harvest.101.3 <- 600
+
+shrimp.harvest.day.32 <- as.integer(shrimp.32.g / 7) * 7
+```
+
+Review production plan(s) to achieve:
+
+* 95^th^ st. 2022.Day `r shrimp.harvest.day.32` harvest `r harvest.95.1` individual `r growout.max`g shrimp per raceway.
+* 95^th^ st. 2022. Day `r shrimp.harvest.day.32 + 14` harvest `r harvest.95.2` individual `r growout.max`g shrimp per raceway.
+
+* 95^th^ st. 2023. Day `r shrimp.harvest.day.32` harvest `r harvest.primo.1` individual `r growout.max`g shrimp per raceway.
+* 95^th^ st. 2023. Day `r shrimp.harvest.day.32 + 14` harvest `r harvest.primo.2` individual `r growout.max`g shrimp per raceway.
+* 95^th^ st. 2023. Day `r shrimp.harvest.day.32 + 28` harvest `r harvest.primo.3` individual `r growout.max`g shrimp per raceway.
+
+* 101^st^ st. Day `r shrimp.harvest.day.32` harvest `r harvest.101.1` individual `r growout.max`g shrimp per raceway.
+* 101^st^ st. Day `r shrimp.harvest.day.32 + 14` harvest `r harvest.101.2` individual `r growout.max`g shrimp per raceway.
+* 101^st^ st. Day `r shrimp.harvest.day.32 + 28` harvest `r harvest.101.3` individual `r growout.max`g shrimp per raceway.  
+
+Definitions:  
+
+* Phase - life stage or treatment process (Quarantine, Nursery, Juvenile, Growout, Depurate).  
+* System - a single tank/ raceway in isolation or a group or tanks supported by a water processing unit.  
+* Facility - collection of systems and phases in operation at same time (not including quarantine as located at separate facility). 
+
+### System Occupation 95^th^st 2022:
+
+``` {r system_occupation}
+batch_frequency <- 30 # days between batches
+batch_system_periods <- 1 # overall number of system periods
+production_cycle <- 220 # period whose factor includes frequency, system period and exceeds minimum growout period
+quarantine.period <- 29
+nursery.period <- 30
+juvenile.period <- 30
+growout.period <- 120
+depuration.period <- ceiling((harvest.95.1 + harvest.95.2) * 2 / 1600)
+```
+
+* Quarantine `r quarantine.period + 1` days.
+* Nursery `r nursery.period` days.
+* Juvenile `r juvenile.period` days.
+* Grow-out up to `r growout.period` days.
+* Depuration `r depuration.period` days.
+
+``` {r prod_plan_95}
+
+# set production period to two growth periods to observe system loading
+prod_plan <- data.frame(facility_day = seq(0, 2 * production_cycle - 1)) %>%
+  mutate(batch_1 = case_when(facility_day < production_cycle ~ facility_day))
+
+for (lag_size in c(0:12)) {
+  
+  new_col_name <- paste0("lag.batch.", lag_size)
+  
+  prod_plan <- prod_plan %>%
+    mutate(!!sym(new_col_name) := lag(batch_1, n = lag_size * batch_frequency, default = NA))
+}
+
+# remove column called batch_1
+prod.plan <- prod_plan %>% select(-batch_1) %>%
+  pivot_longer(c(lag.batch.0:lag.batch.12), names_to = "batch", values_to = "batch_day", values_drop_na = TRUE) %>%
+  mutate(system = case_when(batch_day %in% c(0:quarantine.period) ~ "quarantine",
+                            batch_day %in% c(quarantine.period + 1: nursery.period) ~ "nursery",
+                            batch_day %in% c(quarantine.period + nursery.period + 1 : juvenile.period) ~ "juvenile",
+                            batch_day %in% c(quarantine.period + nursery.period + juvenile.period + 1 : growout.period) ~ "growout",
+                            batch_day %in% c(quarantine.period + nursery.period + juvenile.period + growout.period + 1 : depuration.period)  ~ "depurate")) %>%
+  drop_na() %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.2", "lag.batch.5", "lag.batch.7", "lag.batch.10"))
+```
+
+``` {r System95Plot, fig.cap = "95^th^ st (2022). Production schematic.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# custom color
+system_cols <- c(quarantine = "#d0d1e6", nursery = "#a6bddb", juvenile = "#74a9cf", growout = "#2b8cbe", depurate = "#045a8d")
+
+systems_plot <- prod.plan %>%
+  filter(batch_day <= production_cycle,
+         batch %in% c("lag.batch.0", "lag.batch.2", "lag.batch.5", "lag.batch.7", "lag.batch.10")) %>%
+  ggplot(aes(facility_day, batch, color = system)) +
+  geom_line(size = 3) +
+  scale_y_discrete(limits = c("lag.batch.0", "lag.batch.2", "lag.batch.5", "lag.batch.7", "lag.batch.10"),
+                   labels = c("Batch 1", "Batch 2", "Batch 3", "Batch 4", "Batch 5")) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Day", y = "") + 
+  theme_minimal()
+
+systems_plot
+```
+
+## System Occupation 95^th^st 2023:
+
+```{r system_occupation_primo}
+
+# production plan primo 95
+# define parameters
+batch_frequency.primo <- 60 # days between batches
+batch_system_periods.primo <- 1 # overall number of system periods
+production_cycle.primo <- 220
+quarantine.period.primo <- 29
+nursery.period.primo <- 60
+growout.period.primo <- 120
+depuration.period.primo <- ceiling((harvest.95.1 + harvest.95.2) * 2 / 1600)
+```
+
+* Quarantine `r quarantine.period.primo + 1` days.
+* Nursery `r nursery.period.primo` days.
+* Grow-out up to `r growout.period.primo` days.
+* Depuration `r depuration.period.primo` days.
+
+``` {r prod_plan_primo}
+
+# set primo production period to two growth periods to observe system loading
+prod_plan_primo <- data.frame(facility_day = seq(0, 2 * production_cycle.primo - 1)) %>%
+  mutate(batch_1 = case_when(facility_day < production_cycle.primo ~ facility_day))
+
+for (lag_size in c(0:12)) {
+  
+  new_col_name <- paste0("lag.batch.", lag_size)
+  
+  prod_plan_primo <- prod_plan_primo %>%
+    mutate(!!sym(new_col_name) := lag(batch_1, n = lag_size * batch_frequency.primo, default = NA))
+}
+
+# remove column called batch_1 from prod_plan_primo
+prod.plan.primo <- prod_plan_primo %>% select(-batch_1) %>%
+  pivot_longer(c(lag.batch.0:lag.batch.12), names_to = "batch", values_to = "batch_day", values_drop_na = TRUE) %>%
+  mutate(system = case_when(batch_day %in% c(0:quarantine.period.primo) ~ "quarantine",
+                            batch_day %in% c(quarantine.period.primo + 1 : nursery.period.primo ) ~ "nursery",
+                            batch_day %in% c(quarantine.period.primo + nursery.period.primo + 1 : growout.period.primo) ~ "growout",
+                            batch_day %in% c(quarantine.period.primo + nursery.period.primo  + growout.period.primo + 1 : depuration.period.primo)  ~ "depurate")) %>%
+  drop_na()
+```
+
+``` {r SystemsPlotPrimo, fig.cap = "95^th^ st (2023). Production schematic.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# custom color
+system_cols.primo <- c(quarantine = "#d0d1e6", nursery = "#a6bddb", growout = "#2b8cbe", depurate = "#045a8d")
+
+systems_plot.primo <- prod.plan.primo %>%
+  filter(batch_day <= production_cycle.primo,
+         batch %in% c('lag.batch.0', 'lag.batch.1', 'lag.batch.2', 'lag.batch.3', 'lag.batch.4', 'lag.batch.5', 'lag.batch.6')) %>%
+  ggplot(aes(facility_day, batch, color = system)) +
+  geom_line(size = 3) +
+  scale_y_discrete(limits = c('lag.batch.0', 'lag.batch.1', 'lag.batch.2', 'lag.batch.3', 'lag.batch.4', 'lag.batch.5', 'lag.batch.6'),
+                   labels = c("Batch 1", "Batch 2", "Batch 3", "Batch 4", "Batch 5", "Batch 6", "Batch 7")) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "") + 
+  theme_minimal()
+
+systems_plot.primo
+```
+
+## System Occupation 101^st^st 2024:
+
+``` {r system_occupation_101}
+
+# production plan 101
+# define parameters
+batch_frequency.101 <- 60 # days between batches
+batch_system_periods.101 <- 1 # overall number of system periods
+production_cycle.101 <- 220
+quarantine.period.101 <- 29
+nursery.period.101 <- 60
+growout.period.101 <- 120
+depuration.period.101 <- ceiling((harvest.101.1 + harvest.101.2) * 6 / 1600)
+```
+
+* Quarantine `r quarantine.period.101 + 1` days.
+* Nursery `r nursery.period.101` days.
+* Grow-out up to `r growout.period.101` days.
+* Depuration `r depuration.period.101` days.
+
+``` {r prod_plan_101}
+
+# set primo production period to two growth periods to observe system loading
+prod_plan_101 <- data.frame(facility_day = seq(0, 2 * production_cycle.101 - 1)) %>%
+  mutate(batch_1 = case_when(facility_day < production_cycle.101 ~ facility_day))
+
+for (lag_size in c(0:12)) {
+  
+  new_col_name <- paste0("lag.batch.", lag_size)
+  
+  prod_plan_101 <- prod_plan_101 %>%
+    mutate(!!sym(new_col_name) := lag(batch_1, n = lag_size * batch_frequency.101, default = NA))
+}
+
+# remove column called batch_1 from prod_plan_101
+prod.plan.101 <- prod_plan_101 %>% select(-batch_1) %>%
+  pivot_longer(c(lag.batch.0:lag.batch.12), names_to = "batch", values_to = "batch_day", values_drop_na = TRUE) %>%
+  mutate(system = case_when(batch_day %in% c(0:quarantine.period.101) ~ "quarantine",
+                            batch_day %in% c(quarantine.period.101 + 1 : nursery.period.101) ~ "nursery",
+                            batch_day %in% c(quarantine.period.101 + nursery.period.101 + 1 : growout.period.101) ~ "growout",
+                            batch_day %in% c(quarantine.period.101 + nursery.period.101  + growout.period.101 + 1 : depuration.period.101)  ~ "depurate")) %>%
+  drop_na()
+```
+
+``` {r Systems101Plot, fig.cap = "101^st^ st (2024). Production schematic.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# custom color
+system_cols.101 <- c(quarantine = "#d0d1e6", nursery = "#a6bddb", growout = "#2b8cbe", depurate = "#045a8d")
+
+systems_plot.101 <- prod.plan.101 %>%
+  filter(batch_day <= production_cycle.101,
+         batch %in% c('lag.batch.0', 'lag.batch.1', 'lag.batch.2', 'lag.batch.3', 'lag.batch.4', 'lag.batch.5', 'lag.batch.6')) %>%
+  ggplot(aes(facility_day, batch, color = system)) +
+  geom_line(size = 3) +
+  scale_y_discrete(limits = c('lag.batch.0', 'lag.batch.1', 'lag.batch.2', 'lag.batch.3', 'lag.batch.4', 'lag.batch.5', 'lag.batch.6'),
+                   labels = c("Batch 1", "Batch 2", "Batch 3", "Batch 4", "Batch 5", "Batch 6", "Batch 7")) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "") + 
+  theme_minimal()
+
+systems_plot.101
+```
+
+***
+
+# System Loading
+
+``` {r shrimp_survival}
+quarantine.in <- 35000
+nursery.in <- 19500
+juvenile.in <- 15000
+growout.in <- 11000
+growout.out <- 8800
+depurate.in <- 1600
+
+quarantine.survival <- 0.8
+nursery.survival <- 0.8
+juvenile.survival <- 0.8
+growout.survival <- 0.8
+
+```
+
+Parameters used:
+
+* Quarantine survival `r format(quarantine.survival * 100, scientific = FALSE, digits = 3)` %
+* Nursery survival `r format(nursery.survival * 100, scientific = FALSE, digits = 3)` %
+* Juvenile survival `r format(juvenile.survival * 100, scientific = FALSE, digits = 3)` % (95^th^st 2022 only)
+* Growout survival `r format(growout.survival * 100, scientific = FALSE, digits = 3)` %
+
+``` {r feed_model}
+
+nursery.feed <- 0.05
+growout.feed <- 0.04
+depurate.feed <- 0
+
+quarantine.protein <- 0.5
+nursery.protein <- 0.4
+juvenile.protein <- 0.4
+growout.protein <- 0.35
+depurate.protein <- 0.35
+
+# import data
+feed <- read.csv("data/feed.csv")
+
+# filter phases of interest
+quarantine.feed <- feed %>%
+  filter(phase == "quarantine")
+
+juvenile.feed <- feed %>%
+  filter(phase == "juvenile")
+
+juvenile.nursery.feed <- feed %>%
+  filter(phase == "juvenile" | phase == "nursery")
+
+quarantine.feed.twinlog <- lm(log(feed_pc) ~ log(wt), data = quarantine.feed)
+
+juvenile.feed.log <- lm(log(feed_pc) ~ wt, data = juvenile.feed)
+
+juvenile.nursery.feed.log <- lm(log(feed_pc) ~ wt, data = juvenile.nursery.feed)
+```
+
+``` {r facility_95}
+
+quarantine.system.division <- 1
+nursery.system.division <- 3
+juvenile.system.division <- 1
+growout.system.division <- 2
+depurate.system.division <- 1
+depurate.tanks <- 4
+
+initial.stock <- 35000
+```
+
+## 95^th^ st. 2022 phase designations:
+
+* Quarantine - initial population of `r format(initial.stock, scientific = FALSE)` individuals of body-weight `r bw_0` : `r quarantine.max`
+* Nursery - divide `r format(nursery.in, scientific = FALSE)`, `r quarantine.max`g, shrimp between `r nursery.system.division` independently operating system(s), raise to `r nursery.max`g.
+* Juvenile - rear `r format(juvenile.in, scientific = FALSE)`, `r nursery.max`g, shrimp within `r juvenile.system.division` system(s), raise to `r juvenile.max`g.
+* Growout - rear `r format(growout.in, scientific = FALSE)`, `r juvenile.max`g, shrimp within `r growout.system.division` system(s), raise to `r growout.max`g.
+* Depuration - purge up to `r format(depurate.in, scientific = FALSE)`, `r growout.max`g shrimp - split between `r depurate.tanks` tank(s), operated by `r depurate.system.division` treatment system(s).
+
+``` {r system_loading_95}
+
+# build system loading onto production plan
+system.loading <- prod.plan %>%
+  mutate(total.number = case_when(system == "quarantine" ~ initial.stock * exp(1)^(log(quarantine.survival) / quarantine.period * batch_day),
+                                  system == "nursery" ~ nursery.in * exp(1)^(log(nursery.survival) / nursery.period * (batch_day - (quarantine.period + 1))),
+                                  system == "juvenile" ~ juvenile.in * exp(1)^(log(juvenile.survival) / juvenile.period * (batch_day - (quarantine.period + 1) - nursery.period)),
+                                  system == "growout" ~ growout.in * exp(1)^(log(growout.survival) / growout.period * (batch_day - (quarantine.period + 1) - nursery.period - juvenile.period)),
+                                  system == "depurate" ~ depurate.in),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 ~ total.number - harvest.95.1 * growout.system.division, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 + 14 ~ 0, TRUE ~ total.number),
+         process.number = case_when(system == "quarantine" ~ total.number / quarantine.system.division,
+                                 system == "nursery" ~ total.number / nursery.system.division,
+                                 system == "juvenile" ~ total.number / juvenile.system.division,
+                                 system == "growout" ~ total.number / growout.system.division,
+                                 system == "depurate" ~ total.number / depurate.system.division),
+         bw = case_when(system == "depurate" ~ 32, TRUE ~ (bw_0^c_1 + c_2 * batch_day)^c_4),
+         feed.rate = case_when(system == "quarantine" ~ exp(quarantine.feed.twinlog$coef[1]) * bw ^ quarantine.feed.twinlog$coef[2],
+                               system == "nursery" ~ nursery.feed,
+                               system == "juvenile" ~ exp(juvenile.feed.log$coef[1] + bw * juvenile.feed.log$coef[2]),
+                               system == "growout" ~ growout.feed,
+                               system == "depurate" ~ depurate.feed),
+         protein.proportion = case_when(system == "quarantine" ~ quarantine.protein,
+                                        system == "nursery" ~ nursery.protein,
+                                        system == "juvenile" ~ juvenile.protein,
+                                        system == "growout" ~ growout.protein,
+                                        system == "depurate" ~ depurate.protein),
+         total.bw.kg = bw * total.number / 1000,
+         total.feed.kg = total.bw.kg * feed.rate,
+         total.protein = total.feed.kg * protein.proportion,
+         process.bw.kg = bw * process.number / 1000,
+         process.feed.kg = process.bw.kg * feed.rate,
+         process.protein = process.feed.kg * protein.proportion)
+```
+
+``` {r SystemIndividuals95, fig.cap = "Total number of individuals per phase (95^th^ st. 2022).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+system.n.95 <- system.loading %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, total.number, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Number of Shrimp in Batch") + 
+  theme_minimal()
+
+system.n.95
+```
+
+``` {r ProcessIndividuals95, fig.cap = "Total number of individuals per system (95^th^ st. 2022).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+tank.n.95 <- system.loading %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, process.number, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Number of Shrimp in System") + 
+  theme_minimal()
+
+tank.n.95
+```
+
+## 95^th^ st. 2023 phase designations:
+
+``` {r facility_primo}
+
+# system loading for primo
+quarantine.in.primo <- 65000
+nursery.in.primo <- 44000
+growout.in.primo <- 16500
+growout.out.primo <- 13200
+depurate.in.primo <- 1600
+nursery.harvest.primo <- 4000
+
+harvest.primo.1 <- 1200
+harvest.primo.2 <- 1000
+harvest.primo.3 <- 600
+
+quarantine.primo.division <- 1
+nursery.primo.division <- 2
+growout.primo.division <- 3
+depurate.primo.division <- 1
+depurate.tanks.primo <- 4
+```
+
+* Quarantine - initial population of `r format(quarantine.in.primo, scientific = FALSE)` individuals of body-weight `r bw_0` : `r quarantine.max`
+* Nursery - divide `r format(nursery.in.primo, scientific = FALSE)`, `r quarantine.max`g, shrimp between `r nursery.primo.division` independently operating system(s), raise to `r juvenile.max`g.
+* Growout - rear `r format(growout.in.primo, scientific = FALSE)`, `r juvenile.max`g, shrimp within `r growout.primo.division` system(s), raise to `r growout.max`g.
+* Depuration - purge up to `r format(depurate.in.primo, scientific = FALSE)`, `r growout.max`g shrimp - split between `r depurate.tanks.primo` tank(s), operated by `r depurate.primo.division` treatment system(s).
+
+``` {r system_loading_primo}
+
+# build system loading onto production plan
+system.loading.primo <- prod.plan.primo %>%
+  mutate(total.number = case_when(system == "quarantine" ~ quarantine.in.primo * exp(1)^(log(quarantine.survival) / quarantine.period.primo * batch_day),
+                                  system == "nursery" ~ nursery.in.primo * exp(1)^(log(nursery.survival) / nursery.period.primo * (batch_day - (quarantine.period.primo + 1))),
+                                  system == "growout" ~ growout.in.primo * exp(1)^(log(growout.survival) / growout.period.primo * (batch_day - (quarantine.period.primo + 1) - nursery.period.primo)),
+                                  system == "depurate" ~ depurate.in.primo),
+         total.number = case_when(system == "nursery" & batch_day >= shrimp.5.g ~ total.number - nursery.harvest.primo * nursery.primo.division, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 ~ total.number - harvest.primo.1 * growout.primo.division, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 + 14 ~ total.number - harvest.primo.2 * growout.primo.division, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 + 28 ~ 0, TRUE ~ total.number),
+         process.number = case_when(system == "quarantine" ~ total.number / quarantine.primo.division,
+                                    system == "nursery" ~ total.number / nursery.primo.division,
+                                    system == "growout" ~ total.number / growout.primo.division,
+                                    system == "depurate" ~ total.number / depurate.primo.division),
+         bw = case_when(system == "depurate" ~ 32, TRUE ~ (bw_0^c_1 + c_2 * batch_day)^c_4),
+         feed.rate = case_when(system == "quarantine" ~ exp(quarantine.feed.twinlog$coef[1]) * bw ^ quarantine.feed.twinlog$coef[2],
+                               system == "nursery" ~ exp(juvenile.nursery.feed.log$coef[1] + bw * juvenile.nursery.feed.log$coef[2]),
+                               system == "growout" ~ growout.feed,
+                               system == "depurate" ~ depurate.feed),
+         protein.proportion = case_when(system == "quarantine" ~ quarantine.protein,
+                                        system == "nursery" ~ nursery.protein,
+                                        system == "growout" ~ growout.protein,
+                                        system == "depurate" ~ depurate.protein),
+         total.bw.kg = bw * total.number / 1000,
+         total.feed.kg = total.bw.kg * feed.rate,
+         total.protein = total.feed.kg * protein.proportion,
+         process.bw.kg = bw * process.number / 1000,
+         process.feed.kg = process.bw.kg * feed.rate,
+         process.protein = process.feed.kg * protein.proportion)
+```
+
+``` {r SystemIndividualsPrimo, fig.cap = "Total number of individuals per phase (95^th^ st. 2023).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+system.n.primo <- system.loading.primo %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, total.number, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Number of Shrimp in Batch") + 
+  theme_minimal()
+
+system.n.primo
+```
+
+``` {r ProcessIndividualsPrimo, fig.cap = "Total number of individuals per system (95^th^ st. 2023).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+tank.n.primo <- system.loading.primo %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, process.number, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Number of Shrimp in System") + 
+  theme_minimal()
+
+tank.n.primo
+```
+
+## 101^st^ st. 2024 phase designations:
+
+``` {r facility_101}
+
+# system loading for 101
+quarantine.in.101.a <- 65000
+quarantine.in.101.b <- 100000
+nursery.in.101.a <- 23000 * 2
+nursery.in.101.b <- 23000 * 3
+growout.in.101.a <- 5200 * 4
+growout.in.101.b <- 5200 * 6
+depurate.in.101 <- 1600
+nursery.harvest.101 <- 4000
+
+harvest.101.1 <- 1200
+harvest.101.2 <- 600
+harvest.101.3 <- 600
+
+quarantine.101.division <- 1
+nursery.101.division <- 2
+growout.101.division.a <- 4
+growout.101.division.b <- 2
+growout.101.tank.multiplier <- 6
+depurate.101.division <- 1
+depurate.tanks.101 <- 4
+```
+
+* Quarantine - initial population of `r format(quarantine.in.101.a, scientific = FALSE)`- `r format(quarantine.in.101.b, scientific = FALSE)` individuals of body-weight `r bw_0` : `r quarantine.max`
+* Nursery - divide `r format(nursery.in.101.a, scientific = FALSE)` - `r format(nursery.in.101.b, scientific = FALSE)`, `r quarantine.max`g, shrimp between `r nursery.101.division` independently operating system(s), raise to `r juvenile.max`g.
+* Growout - rear `r format(growout.in.101.a, scientific = FALSE)` - `r format(growout.in.101.b, scientific = FALSE)`, `r juvenile.max`g, shrimp within `r growout.101.division.a` - `r growout.101.tank.multiplier` system(s), raise to `r growout.max`g.
+* Depuration - purge up to `r format(depurate.in.primo, scientific = FALSE)`, `r growout.max`g shrimp - split between `r depurate.tanks.primo` tank(s), operated by `r depurate.primo.division` treatment system(s).
+
+``` {r system_loading_101}
+
+# build system loading onto production plan 101
+system.loading.101 <- prod.plan.101 %>%
+  mutate(total.number = case_when(system == "quarantine" ~ quarantine.in.101.a * exp(1)^(log(quarantine.survival) / quarantine.period.101 * batch_day),
+                                  system == "nursery" ~ nursery.in.101.a * exp(1)^(log(nursery.survival) / nursery.period.101 * (batch_day - (quarantine.period.101 + 1))),
+                                  system == "growout" ~ growout.in.101.a * exp(1)^(log(growout.survival) / growout.period.101 * (batch_day - (quarantine.period.101 + 1) - nursery.period.101)),
+                                  system == "depurate" ~ depurate.in.101),
+         total.number = case_when(system == "quarantine" & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ quarantine.in.101.b * exp(1)^(log(quarantine.survival) / quarantine.period.101 * batch_day), TRUE ~ total.number),
+         total.number = case_when(system == "nursery" & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ nursery.in.101.b * exp(1)^(log(nursery.survival) / nursery.period.101 * (batch_day - (quarantine.period.101 + 1))), TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ growout.in.101.b * exp(1)^(log(growout.survival) / growout.period.101 * (batch_day - (quarantine.period.101 + 1) - nursery.period.101)), TRUE ~ total.number),
+         total.number = case_when(system == "nursery" & batch_day >= shrimp.5.g ~ total.number - nursery.harvest.101 * nursery.101.division, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 ~ total.number - harvest.101.1 * growout.101.division.a, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 + 14 ~ total.number - harvest.101.2 * growout.101.division.a, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.harvest.day.32 + 28 ~ 0, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.32.g & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ total.number - harvest.101.1 * growout.101.division.b, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.32.g + 15 & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ total.number - harvest.101.2 * growout.101.division.b, TRUE ~ total.number),
+         total.number = case_when(system == "growout" & batch_day >= shrimp.32.g + 30 & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ 0, TRUE ~ total.number),
+         process.number = case_when(system == "quarantine" ~ total.number / quarantine.101.division,
+                                    system == "nursery" ~ total.number / nursery.101.division,
+                                    system == "growout" ~ total.number / growout.101.division.a,
+                                    system == "depurate" ~ total.number / depurate.101.division),
+         process.number = case_when(system == "growout" & batch %in% c("lag.batch.1", "lag.batch.3", "lag.batch.5", "lag.batch.7", "lag.batch.9", "lag.batch.11") ~ total.number / growout.101.tank.multiplier, TRUE ~ process.number),
+         bw = case_when(system == "depurate" ~ 32, TRUE ~ (bw_0^c_1 + c_2 * batch_day)^c_4),
+         feed.rate = case_when(system == "quarantine" ~ exp(quarantine.feed.twinlog$coef[1]) * bw ^ quarantine.feed.twinlog$coef[2],
+                               system == "nursery" ~ exp(juvenile.nursery.feed.log$coef[1] + bw * juvenile.nursery.feed.log$coef[2]),
+                               system == "growout" ~ growout.feed,
+                               system == "depurate" ~ depurate.feed),
+         protein.proportion = case_when(system == "quarantine" ~ quarantine.protein,
+                                        system == "nursery" ~ nursery.protein,
+                                        system == "growout" ~ growout.protein,
+                                        system == "depurate" ~ depurate.protein),
+         total.bw.kg = bw * total.number / 1000,
+         total.feed.kg = total.bw.kg * feed.rate,
+         total.protein = total.feed.kg * protein.proportion,
+         process.bw.kg = bw * process.number / 1000,
+         process.feed.kg = process.bw.kg * feed.rate,
+         process.protein = process.feed.kg * protein.proportion)
+```
+
+```{r SystemIndividuals101, fig.cap = "Total number of individuals per phase (101^st^ st. 2024).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+batch.names <- c("lag.batch.0" = "Batch 1", "lag.batch.1" = "Batch 2")
+
+system.n.101 <- system.loading.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1")) %>%
+  ggplot(aes(batch_day, total.number, color = system)) +
+  geom_line() +
+  xlim(0, 210) +
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Number of Shrimp in Batch") + 
+  theme_minimal()
+
+system.n.101
+```
+
+``` {r ProcessIndividuals101, fig.cap = "Total number of individuals per system (101^st^ st. 2024).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+tank.n.101 <- system.loading.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1")) %>%
+  ggplot(aes(batch_day, process.number, color = system)) +
+  geom_line()+
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Number of Shrimp in System") + 
+  theme_minimal()
+
+tank.n.101
+```
+
+The following feeding models were developed to estimate system loading across the production cycle through the developmental phases:
+
+``` {r FeedPlot, fig.cap = "Feeding model - overlaid on feed tables.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+feed.plot <- feed %>%
+  ggplot(aes(wt, feed_pc, color = phase)) +
+  geom_line()+
+  stat_function(fun = function(x) exp(quarantine.feed.twinlog$coef[1]) * x ^ quarantine.feed.twinlog$coef[2],
+                color = 'orange', xlim = c(0.007, 1.2), alpha = 0.4) +
+  stat_function(fun = function(x) nursery.feed,
+                color = "orange", xlim = c(1.2, 3.0), alpha = 0.4) +
+  stat_function(fun = function(x) exp(juvenile.feed.log$coef[1] + x * juvenile.feed.log$coef[2]),
+                color = 'orange', xlim = c(3.0, 10), alpha = 0.4) +
+  stat_function(fun = function(x) growout.feed,
+                color = "orange", xlim = c(10, 32), alpha = 0.4) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Shrimp bodyweight (g)", y = "Feed as proportion of bodyweight") + 
+  theme_minimal()
+
+feed.plot
+```
+
+## 95^th^ st. (2022) System Loading:
+
+``` {r feed_loading_95}
+
+# get max loading for each system (overlapping batches where appropriate)
+avg.loading.95 <- system.loading %>%
+  group_by(system, facility_day) %>%
+  summarise(n_sum = sum(total.number),
+            feed.sum = sum(total.feed.kg),
+            protein.sum = sum(total.protein)) %>%
+  summarise(n_max = max(n_sum),
+            feed.avg = mean(feed.sum),
+            feed.max = max(feed.sum),
+            protein.avg = mean(protein.sum),
+            protein.max = max(protein.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get a summary table for all minus quarantine
+facility.loading.95 <- system.loading %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(n_sum = sum(total.number),
+            feed.sum = sum(total.feed.kg),
+            protein.sum = sum(total.protein)) %>%
+  summarise(n_max = max(n_sum),
+            feed.avg = mean(feed.sum),
+            feed.max = max(feed.sum),
+            protein.avg = mean(protein.sum),
+            protein.max = max(protein.sum))
+```
+
+### Feed and protein maximum and average facility loading rates.
+
+``` {r FeedLoadingTable95, ft.align="center"}
+
+facility.loading.95 %>%
+  flextable() %>%
+  set_header_labels(n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"),  " st. 2022 facility loading rates (overlapping batches where appropriate)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab", bkm = "tab1"))
+```
+
+### Feed and protein maximum and average loading rates per day per system.
+
+``` {r feed_loading_unit95}
+
+# get max loading for individual system processes - filter one batch
+process.loading_95 <- system.loading %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(n_max = max(process.number),
+            feed.avg = mean(process.feed.kg),
+            feed.max = max(process.feed.kg),
+            protein.avg = mean(process.protein),
+           protein.max = max(process.protein)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+```
+
+``` {r SystemFeedLoadingTable95, ft.align="center"}
+
+process.loading_95 %>%
+  flextable() %>%
+  set_header_labels(system = "System",  n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+  set_caption(caption = as_paragraph("95", as_sup("th"),  " st. 2022 System loading rates."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+
+```
+
+## 95^th^ st. (2023) Facility Loading:
+
+``` {r feed_loading_primo}
+
+# get max loading for each system in primo (overlapping batches where appropriate)
+avg.loading.primo <- system.loading.primo %>%
+  group_by(system, facility_day) %>%
+  summarise(n_sum = sum(total.number),
+            feed.sum = sum(total.feed.kg),
+            protein.sum = sum(total.protein)) %>%
+  summarise(n_max = max(n_sum),
+            feed.avg = mean(feed.sum),
+            feed.max = max(feed.sum),
+            protein.avg = mean(protein.sum),
+            protein.max = max(protein.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "growout", "depurate")))
+
+# ignore the above and get a summary table for all minus quarantine
+facility.loading.primo <- system.loading.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(n_sum = sum(total.number),
+            feed.sum = sum(total.feed.kg),
+            protein.sum = sum(total.protein)) %>%
+  summarise(n_max = max(n_sum),
+            feed.avg = mean(feed.sum),
+            feed.max = max(feed.sum),
+            protein.avg = mean(protein.sum),
+            protein.max = max(protein.sum))
+```
+
+### Feed and protein maximum and average loading rates per day per system (phase).
+
+``` {r FeedLoadingTablePrimo, ft.align="center"}
+
+facility.loading.primo %>%
+  flextable() %>%
+  set_header_labels(n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"),  " st. 2023 facility loading rate (overlapping batches where appropriate)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### Feed and protein maximum and average loading rates per day per system.
+
+``` {r feed_loading_unit_primo}
+
+# get max loading for individual system processes - filter one batch
+process.loading_primo <- system.loading.primo %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(n_max = max(process.number),
+            feed.avg = mean(process.feed.kg),
+            feed.max = max(process.feed.kg),
+            protein.avg = mean(process.protein),
+            protein.max = max(process.protein)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "growout", "depurate")))
+```
+
+``` {r SystemFeedLoadingTablePrimo, ft.align="center"}
+
+process.loading_primo %>%
+  flextable() %>%
+  set_header_labels(system = "System",  n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+  set_caption(caption = as_paragraph("95", as_sup("th"),  " st. 2023 System loading rates."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+## 101^st^ st. (2024) Facility Loading:
+
+``` {r feed_loading_101}
+
+# get max loading for each system in primo (overlapping batches where appropriate)
+avg.loading.101 <- system.loading.101 %>%
+  group_by(system, facility_day) %>%
+  summarise(n_sum = sum(total.number),
+            feed.sum = sum(total.feed.kg),
+            protein.sum = sum(total.protein)) %>%
+  summarise(n_max = max(n_sum),
+            feed.avg = mean(feed.sum),
+            feed.max = max(feed.sum),
+            protein.avg = mean(protein.sum),
+            protein.max = max(protein.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "growout", "depurate")))
+
+# ignore the above and get a summary table for all minus quarantine
+facility.loading.101 <- system.loading.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(n_sum = sum(total.number),
+            feed.sum = sum(total.feed.kg),
+            protein.sum = sum(total.protein)) %>%
+  summarise(n_max = max(n_sum),
+            feed.avg = mean(feed.sum),
+            feed.max = max(feed.sum),
+            protein.avg = mean(protein.sum),
+            protein.max = max(protein.sum))
+```
+
+### Feed and protein maximum and average loading rates per day per system (phase).
+
+``` {r FeedLoadingTable101, ft.align="center"}
+
+facility.loading.101 %>%
+  flextable() %>%
+  set_header_labels(n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 facility loading rates (overlapping batches where appropriate)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### Feed and protein maximum and average loading rates per system.
+
+``` {r feed_loading_101a_unit}
+
+# get max loading for individual system processes - filter one batch
+process.loading_101.a <- system.loading.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(n_max = max(process.number),
+            feed.avg = mean(process.feed.kg),
+            feed.max = max(process.feed.kg),
+            protein.avg = mean(process.protein),
+            protein.max = max(process.protein)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "growout", "depurate")))
+```
+
+``` {r SystemFeedLoadingTable101a, ft.align="center"}
+
+process.loading_101.a %>%
+  flextable() %>%
+  set_header_labels(system = "System",  n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+  set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 system loading rates (four raceway strategy)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r feed_loading_101b_unit}
+
+# get max loading for individual system processes - filter one batch
+process.loading_101.b <- system.loading.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(n_max = max(process.number),
+            feed.avg = mean(process.feed.kg),
+            feed.max = max(process.feed.kg),
+            protein.avg = mean(process.protein),
+            protein.max = max(process.protein)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "growout", "depurate")))
+```
+
+``` {r SystemFeedLoadingTable101b, ft.align="center"}
+
+process.loading_101.b %>%
+  flextable() %>%
+  set_header_labels(system = "System",  n_max = "Max n", feed.avg = "Feed avg (Kg/day)", feed.max = "Feed max (Kg/day)", protein.avg = "Protein avg (Kg/day)", protein.max = "Protein max (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+  set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 system loading rates (six raceway strategy)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+***
+
+# Water Quality Defining Parameters
+
+Based on feed inputs, the following parameters (inputs or requirements) can be modelled:
+
+* TAN--N Total ammonia nitrogen produced (ionised ammonia + un-ionised ammonia NH~4~^+^--N + NH~3~--N)
+* TSS Total suspended solids produced
+* CO~2~ Carbon dioxide produced
+* O~2~D Oxygen demand
+* Alk Alkalinity demand
+* Carb Carbohydrate demand
+
+``` {r loading_parameters_95}
+
+# 95 st 2022 loading parameters
+# for marine shrimp in zero-exchange system, Ptan = F * PC * 0.144
+# for starvation, TAN =  0.067 mg N-NH3 / h / g
+# starvation oxygen consumption ~ 1 mg Oxy/g/h
+# carb calculations: TAN * 15.17 is carb requirement, less feed carb content feed * 0.1089 / 0.4
+system.parameters.95 <- system.loading %>%
+  mutate(total.tan = case_when(system == "depurate" ~ total.bw.kg * 0.067 * 24 / 1000,
+                               TRUE ~ total.feed.kg * protein.proportion * 0.144), # total tan in kg
+         process.tan = case_when(system == "depurate" ~ process.bw.kg * 0.067 * 24 / 1000,
+                                 TRUE ~ process.feed.kg * protein.proportion * 0.144),
+         total.tss.clearwater = total.feed.kg * 0.25,
+         process.tss.clearwater = process.feed.kg * 0.25,
+         total.tss = case_when(system == "quarantine" ~ total.feed.kg * 0.25,
+                               system == "depurate" ~ total.tan * 0.2,
+                               TRUE ~ (total.feed.kg * 0.25) + (total.tan * 8.07)),
+         process.tss = case_when(system == "quarantine" ~ process.feed.kg * 0.25,
+                                 system == "depurate" ~ process.tan * 0.2,
+                                 TRUE ~ (process.feed.kg * 0.25) + (process.tan * 8.07)),
+         total.od = case_when(system == "quarantine" ~ total.feed.kg * 0.25 + total.tan * 4.57,
+                              system == "depurate" ~ total.bw.kg * 1 / 1000 * 24,
+                              TRUE ~ (total.feed.kg * 0.25) + (total.tan * 4.71)),
+         process.od = case_when(system == "quarantine" ~ process.feed.kg * 0.25 + process.tan * 4.57,
+                                system == "depurate" ~ process.bw.kg * 1 / 1000 * 24,
+                                TRUE ~ (process.feed.kg * 0.25) + (process.tan * 4.71)),
+         total.alk = case_when(system == "quarantine" | system == "depurate" ~ total.tan * 7.05,
+                               TRUE ~ total.tan * 3.57), # 3.57 g of alkalinity consumed in heterotrophic systems
+         process.alk = case_when(system == "quarantine" | system == "depurate" ~ process.tan * 7.05,
+                                 TRUE ~ process.tan * 3.57),
+         total.carb = case_when(system == "quarantine" | system == "depurate" ~ 0,
+                                TRUE ~ total.feed.kg * protein.proportion * 0.144 * 15.17 - (total.feed.kg * 0.1089 / 0.4)),
+         process.carb = case_when(system == "quarantine" | system == "depurate" ~ 0,
+                                  TRUE ~ process.feed.kg * protein.proportion * 0.144 * 15.17 - (process.feed.kg * 0.1089 / 0.4)),
+         total.co2 =  total.od * 1.375,
+         process.co2 = process.od * 1.375)
+```
+
+``` {r loading_parameters_primo}
+
+# 95 st 2023 loading parameters
+# for marine shrimp in zero-exchange system, Ptan = F * PC * 0.144
+system.parameters.primo <- system.loading.primo %>%
+  mutate(total.tan = case_when(system == "depurate" ~ total.bw.kg * 0.067 * 24 / 1000,
+                               TRUE ~ total.feed.kg * protein.proportion * 0.144), # total tan in kg
+         process.tan = case_when(system == "depurate" ~ process.bw.kg * 0.067 * 24 / 1000,
+                                 TRUE ~ process.feed.kg * protein.proportion * 0.144),
+         total.tss.clearwater = total.feed.kg * 0.25,
+         process.tss.clearwater = process.feed.kg * 0.25, 
+         total.tss = case_when(system == "quarantine" ~ total.feed.kg * 0.25,
+                               system == "depurate" ~ total.tan * 0.2,
+                               TRUE ~ (total.feed.kg * 0.25) + (total.tan * 8.07)),
+         process.tss = case_when(system == "quarantine" ~ process.feed.kg * 0.25,
+                                 system == "depurate" ~ process.tan * 0.2,
+                                 TRUE ~ (process.feed.kg * 0.25) + (process.tan * 8.07)),
+         total.od = case_when(system == "quarantine" ~ total.feed.kg * 0.25 + total.tan * 4.57,
+                              system == "depurate" ~ total.bw.kg * 1 / 1000 * 24,
+                              TRUE ~ (total.feed.kg * 0.25) + (total.tan * 4.71)),
+         process.od = case_when(system == "quarantine" ~ process.feed.kg * 0.25 + process.tan * 4.57,
+                                system == "depurate" ~ process.bw.kg * 1 / 1000 * 24,
+                                TRUE ~ (process.feed.kg * 0.25) + (process.tan * 4.71)),
+         total.alk = case_when(system == "quarantine" | system == "depurate" ~ total.tan * 7.05,
+                               TRUE ~ total.tan * 3.57), # 3.57 g of alkalinity consumed in heterotrophic systems
+         process.alk = case_when(system == "quarantine" | system == "depurate" ~ process.tan * 7.05,
+                                 TRUE ~ process.tan * 3.57),
+         total.carb = case_when(system == "quarantine" | system == "depurate" ~ 0,
+                                TRUE ~ total.feed.kg * protein.proportion * 0.144 * 15.17 - (total.feed.kg * 0.1089 / 0.4)),
+         process.carb = case_when(system == "quarantine" | system == "depurate" ~ 0,
+                                  TRUE ~ process.feed.kg * protein.proportion * 0.144 * 15.17 - (process.feed.kg * 0.1089 / 0.4)),
+         total.co2 =  total.od * 1.375,
+         process.co2 = process.od * 1.375)
+```
+
+``` {r loading_parameters_101}
+
+# 101 st 2024 loading parameters
+# for marine shrimp in zero-exchange system, Ptan = F * PC * 0.144
+system.parameters.101 <- system.loading.101 %>%
+  mutate(total.tan = case_when(system == "depurate" ~ total.bw.kg * 0.067 * 24 / 1000,
+                               TRUE ~ total.feed.kg * protein.proportion * 0.144), # total tan in kg
+         process.tan = case_when(system == "depurate" ~ process.bw.kg * 0.067 * 24 / 1000,
+                                 TRUE ~ process.feed.kg * protein.proportion * 0.144),
+         total.tss.clearwater = total.feed.kg * 0.25,
+         process.tss.clearwater = process.feed.kg * 0.25, 
+         total.tss = case_when(system == "quarantine" ~ total.feed.kg * 0.25,
+                               system == "depurate" ~ total.tan * 0.2,
+                               TRUE ~ (total.feed.kg * 0.25) + (total.tan * 8.07)),
+         process.tss = case_when(system == "quarantine" ~ process.feed.kg * 0.25,
+                                 system == "depurate" ~ process.tan * 0.2,
+                                 TRUE ~ (process.feed.kg * 0.25) + (process.tan * 8.07)),
+         total.od = case_when(system == "quarantine" ~ total.feed.kg * 0.25 + total.tan * 4.57,
+                              system == "depurate" ~ total.bw.kg * 1 / 1000 * 24,
+                              TRUE ~ (total.feed.kg * 0.25) + (total.tan * 4.71)),
+         process.od = case_when(system == "quarantine" ~ process.feed.kg * 0.25 + process.tan * 4.57,
+                                system == "depurate" ~ process.bw.kg * 1 / 1000 * 24,
+                                TRUE ~ (process.feed.kg * 0.25) + (process.tan * 4.71)),
+         total.alk = case_when(system == "quarantine" | system == "depurate" ~ total.tan * 7.05,
+                               TRUE ~ total.tan * 3.57), # 3.57 g of alkalinity consumed in heterotrophic systems
+         process.alk = case_when(system == "quarantine" | system == "depurate" ~ process.tan * 7.05,
+                                 TRUE ~ process.tan * 3.57),
+         total.carb = case_when(system == "quarantine" | system == "depurate" ~ 0,
+                                TRUE ~ total.feed.kg * protein.proportion * 0.144 * 15.17 - (total.feed.kg * 0.1089 / 0.4)),
+         process.carb = case_when(system == "quarantine" | system == "depurate" ~ 0,
+                                  TRUE ~ process.feed.kg * protein.proportion * 0.144 * 15.17 - (process.feed.kg * 0.1089 / 0.4)),
+         total.co2 =  total.od * 1.375,
+         process.co2 = process.od * 1.375)
+```
+
+``` {r mass_balance_parameters}
+
+# define water quality parameters
+desired.tss <- 250 #  250 mg/l in tanks as a starting point
+desired.tss.cw <- 20
+desired.o2 <- 5.0 # min 5 mg/l in tanks
+desired.tan <- 1 # max 1 mg/l TAN in tanks
+desired.nitrate <- 50 # max 50 mg/l nitrate in tanks
+desired.co2 <- 15 # max 15 mg/l in tanks
+desired.t <- 30 # system operating temp in C
+site.altitude <- 10 # site altitude in metres
+cone.bar <- 0.7
+feeding.period <- 24
+metabolic.period <- case_when(feeding.period < 20 ~ feeding.period + 4, TRUE ~ 24)
+
+# constants
+k <- 1.42903
+beta.oxygen <- exp(-58.3877 + 85.8079 *  (100/(desired.t + 273.15)) + 23.8439 * log((desired.t+273.15) / 100))
+barometric.pressure <- 10^(2.88014 - site.altitude/19748.2)
+water.v.pressure <- 4.7603 * exp(0.0645 * desired.t)
+oxygen.percent <- 20.95
+oxygen.saturation <- 1000 * k * beta.oxygen * oxygen.percent / 100 * ((barometric.pressure - water.v.pressure) / 760) # if cone used at pressure swap out barometric.pressure for cone.pressure
+cone.pressure <- cone.bar * 750.06 + barometric.pressure
+oxygen.saturation.saline <- oxygen.saturation * 0.8
+```
+
+``` {r mass_balance_equations}
+
+# component specifics
+# system efficiency 
+tan.c1 <- desired.tan
+tan.cbest <- 0
+tan.te <- 0.9
+tan.c2 <- tan.c1 + tan.te * (tan.cbest - tan.c1)
+
+co2.c1 <- desired.co2
+co2.cbest <- 0.5
+co2.te <- 0.7
+co2.c2 <- co2.c1 + co2.te * (co2.cbest - co2.c1)
+
+tss.c1 <- desired.tss
+tss.cbest <- 0
+tss.te <- 0.21
+tss.c2 <- tss.c1 + tss.te * (tss.cbest - tss.c1)
+
+oxy.c1 <- desired.o2 # min 5 mg/l in tanks
+oxy.cbest <- oxygen.saturation.saline
+oxy.te <- 0.99
+oxy.c2 <- oxy.c1 + oxy.te * (oxy.cbest - oxy.c1)
+
+tss.c1.cw <- desired.tss.cw
+tss.cbest.cw <- 0
+tss.te.cw <- 0.7
+tss.c2.cw <- tss.c1.cw + tss.te.cw * (tss.cbest.cw - tss.c1.cw)
+```
+
+***
+
+## Nitrogen Management
+
+TAN--N loading
+
+### 95^th^ st. 2022 TAN--N summary
+
+``` {r tan_summary_95}
+
+# get max tan loading for each system 95th st 2022 (overlapping batches where appropriate)
+tan.system.95 <- system.parameters.95 %>%
+  group_by(system, facility_day) %>%
+  summarise(tan.sum = sum(total.tan)) %>%
+  summarise(tan.s.max = max(tan.sum),
+            tan.s.avg = mean(tan.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility loading minus quarantine
+facility.system.95 <- system.parameters.95 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tan.sum = sum(total.tan)) %>%
+  summarise(tan.s.max = max(tan.sum),
+            tan.s.avg = mean(tan.sum))
+
+# get max tan loading for individual system processes 95th st 2022
+tan.process.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(tan.p.max = max(process.tan),
+            tan.p.avg = mean(process.tan)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join tan summary tibbles 95th st 2022
+tan.summary.95 <- left_join(tan.system.95, tan.process.95, by = "system")
+```
+
+``` {r FacilityTanLoadingTable95, ft.align="center"}
+
+facility.system.95 %>%
+  flextable() %>%
+  set_header_labels(tan.s.max = "Max TAN (Kg/day)", tan.s.avg = "Avg TAN (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Facility loading rates (overlapping batches where appropriate)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TanLoadingTable95, ft.align="center"}
+
+tan.process.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", tan.p.max = "Max TAN (Kg/day)", tan.p.avg = "Avg TAN (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System loading rates."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+
+```
+
+``` {r TanProfile95, fig.cap = "95^th^ st. 2022 System TAN--N profile.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot tan loading across batch run 95th st 2022
+tank.tan.95 <- system.parameters.95 %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, process.tan, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Day", y = "TAN--N (kg)") + 
+  theme_minimal()
+
+tank.tan.95
+```
+
+### 95^th^ st. 2023 TAN--N summary
+
+``` {r tan_summary_primo}
+
+# get max tan loading for each system 95th st 2023 (overlapping batches where appropriate)
+tan.system.primo <- system.parameters.primo %>%
+  group_by(system, facility_day) %>%
+  summarise(tan.sum = sum(total.tan)) %>%
+  summarise(tan.s.max = max(tan.sum),
+            tan.s.avg = mean(tan.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility loading minus quarantine
+facility.system.primo <- system.parameters.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tan.sum = sum(total.tan)) %>%
+  summarise(tan.s.max = max(tan.sum),
+            tan.s.avg = mean(tan.sum))
+
+# get max tan loading for individual system processes 95th st 2023
+tan.process.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(tan.p.max = max(process.tan),
+            tan.p.avg = mean(process.tan)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join tan summary tibbles 95th st 2023
+tan.summary.primo <- left_join(tan.system.primo, tan.process.primo, by = "system")
+```
+
+``` {r FacilityTanLoadingTablePrimo, ft.align="center"}
+
+facility.system.primo %>%
+  flextable() %>%
+  set_header_labels(tan.s.max = "Max TAN (Kg/day)", tan.s.avg = "Avg TAN (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 Facility loading rates (overlapping batches where appropriate)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TanLoadingTablePrimo, ft.align="center"}
+
+tan.process.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", tan.p.max = "Max TAN (Kg/day)", tan.p.avg = "Avg TAN (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System loading rates."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TanProfilePrimo, fig.cap = "95^th^ st. 2023 System TAN--N profile.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot tan loading across batch run 95th st 2023
+tank.tan.primo <- system.parameters.primo %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, process.tan, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "TAN--N (kg)") + 
+  theme_minimal()
+
+tank.tan.primo
+```
+
+### 101^st^ st. 2024 TAN--N summary
+
+``` {r tan_summary_101}
+
+# get max tan loading for each system 101th st 2024 (overlapping batches where appropriate)
+tan.system.101 <- system.parameters.101 %>%
+  group_by(system, facility_day) %>%
+  summarise(tan.sum = sum(total.tan)) %>%
+  summarise(tan.s.max = max(tan.sum),
+            tan.s.avg = mean(tan.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility loading minus quarantine
+facility.system.101 <- system.parameters.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tan.sum = sum(total.tan)) %>%
+  summarise(tan.s.max = max(tan.sum),
+            tan.s.avg = mean(tan.sum))
+
+# get max tan loading for individual system processes 101st st 2024 4 raceway batch
+tan.process.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(tan.p.max.a = max(process.tan),
+            tan.p.avg.a = mean(process.tan)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max tan loading for individual system processes 101st st 2024 6 raceway batch
+tan.process.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(tan.p.max.b = max(process.tan),
+            tan.p.avg.b = mean(process.tan)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join tan summary tibbles 101st st 2024
+tan.summary.101 <- left_join(tan.process.101a, tan.process.101b, by = "system")
+```
+
+``` {r FacilityTanLoadingTable101, ft.align = "center"}
+
+facility.system.101 %>%
+  flextable() %>%
+  set_header_labels(tan.s.max = "Max TAN (Kg/day)", tan.s.avg = "Avg TAN (Kg/day)") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Facility loading rates (overlapping batches where appropriate)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TanLoadingTable101, ft.align = "center"}
+
+tan.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", tan.p.max.a = "System max TAN A", tan.p.avg.a = "System avg TAN A", tan.p.max.b = "System max TAN B", tan.p.avg.b = "System avg TAN B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System loading rates."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TanProfile101, fig.cap = "101^st^ st. 2024 System TAN--N profile.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot tan loading across batch run 101st st 2024
+tank.tan.101 <- system.parameters.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1")) %>%
+  ggplot(aes(facility_day, process.tan, color = system)) +
+  geom_line()+
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Growout", "Depurate")) +
+  labs(x = "Day", y = "TAN--N (kg)") + 
+  theme_minimal()
+
+tank.tan.101
+```
+
+Ammonia removal from intensive aquaculture production can be managed by three distinct pathways:
+
+* Photoautotrophic (algal)
+* Autotrophic (bacterial)
+* Heterotrophic (bacterial)
+
+Of relevance in the production process at SyAqua Americas are autotrophic (quarantine and depuration/ purging) and heterotrophic (nursery, juvenile and grow-out) pathways.
+
+Chemoautotrophic pathway (simplified) NH~4~^+^ + O~2~ + alkalinity &rarr; NO~2~^-^ &rarr; NO~3~^-^ + CO~2~ + small amount of bacterial biomass
+
+Heterotrophic pathway (simplified) NH~4~^+^ + O~2~ + alkalinity + organic C &rarr; large amount of bacterial biomass + CO~2~
+
+The carbon/ nitrogen ratio influences the relative proportion of autotrophic/ heterotrophic bacterial community and therefore may be used as a management tool for determination of nitrogen removal pathway.
+
+Stoichiometric equations predict that for every g of ammonia-nitrogen converted to microbial biomass (by heterotrophic bacteria), 15.17 g of carbohydrates or 6.07 g of organic carbon is consumed. Organic carbon can be made available from livestock feed constituents and supplementary carbohydrate additions e.g. molasses or other source.
+
+NH~4~^+^ -- N within the quarantine systems would typically be removed primarily by the chemoautotrophic pathway, utilising a fixed film moving-bed bioreactor. The volume of the biomedia would be dictated by the surface area and the maximum potential daily NH~4~^+^ -- N loading. 
+
+Suggested minimum quarantine biomedia surface areas are as follows (based on a 24 hr metabolic period):
+
+95^th^ st. 2022; `r format(tan.summary.95[1,2] / (0.4 / 1000), digits = 3)`m^2^  
+95^th^ st. 2023; `r format(tan.summary.primo[1,2] / (0.4 / 1000), digits = 3)`m^2^  
+101^st^ st. 2024; `r format(tan.summary.101[1,2] / (0.4 / 1000), digits = 3)`m^2^
+
+NH~4~^+^ -- N within the depuration/ purging systems would typically be managed by water exchange and minimal nitrification/ ammonia sequestration from bacteria present in the sand filter/ water column.
+
+The charts below indicate theoretical carbohydrate additions required to supplement organic carbon supplied in feed (nursery/ juvenile/ grow-out stages only). 
+
+Calculations based upon:
+
+TAN produced * bacterial carbohydrate demand - carbohydrate in feed
+
+Feed input * protein proportion * 0.144 * 15.17 - (feed input * 0.1089 / 0.4)
+
+### 95^th^ st. 2022
+
+``` {r CarbProfile95, fig.cap = "95^th^ st. 2022 Theoretical supplimentary carbohydrate requirement (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot carb requirement across batch run 95th st 2022
+tank.carb.95 <- system.parameters.95 %>%
+  filter(batch == "lag.batch.0" & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(batch_day, process.carb, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("nursery", "juvenile", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Juvenile", "Growout")) +
+  labs(x = "Day", y = "Supplimentary carb (Kg/day)") + 
+  theme_minimal()
+
+tank.carb.95
+```
+
+### 95^th^ st. 2023
+
+``` {r CarbProfilePrimo, fig.cap = "95^th^ st. 2023 Theoretical supplimentary carbohydrate requirement (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot carb requirement across batch run 95th st 2023
+tank.carb.primo <- system.parameters.primo %>%
+  filter(batch == "lag.batch.0" & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(batch_day, process.carb, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("nursery", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Growout")) +
+  labs(x = "Day", y = "Supplimentary carb (Kg/day)") + 
+  theme_minimal()
+
+tank.carb.primo
+```
+
+### 101^st^ st. 2024
+
+``` {r CarbProfile101, fig.cap = "101^st^ st. 2024 Theoretical supplimentary carbohydrate requirement (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot tan loading across batch run 101st st 2024
+tank.carb.101 <- system.parameters.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1") & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(facility_day, process.carb, color = system)) +
+  geom_line()+
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("nursery", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Growout")) +
+  labs(x = "Day", y = "Supplimentary carb (Kg/day)") + 
+  theme_minimal()
+
+tank.carb.101
+```
+
+***
+
+## Solids Management
+
+Solids within the production process will be comprised of uneaten feed, faeces and bacterial biomass.
+
+The literature indicates a total suspended solids (TSS) concentration of 200-300 mg/l is typical within biofloc operation, and levels of up to 500 mg/l may be acceptable without reduction of welfare or growth of shrimp. 
+
+Solids concentration will increase in zero exchange systems and active management techniques may be required to maintain optimal levels of TSS.
+
+TSS accumulation can be modelled according to system management based on feed input for chemoautotrophic-managed nitrogen pathways or feed input and bacterial biomass synthesised for heterotrophic-managed nitrogen pathways.
+
+Solids profile not currently awailable from SyAqua.   
+Generic biofloc solids profile as follows: < 48 $\mu$m 53%, 48-100 $\mu$m 12%, > 100 $\mu$m 36%  
+Generic clearwater RAS solids profile (trout): < 40 $\mu$m 10%, 40-100 $\mu$m 40%, > 100 $\mu$m 50%
+
+Settling velocities (caveat - estimated specific gravity 1.05):
+48 $\mu$ `r (9.81 * (48e-6)^2 * (1050 - 1000)) / (18 * 0.851e-3)` m/s
+75 $\mu$ `r (9.81 * (75e-6)^2 * (1050 - 1000)) / (18 * 0.851e-3)` m/s
+100 $\mu$ `r (9.81 * (100e-6)^2 * (1050 - 1000)) / (18 * 0.851e-3)` m/s
+
+
+
+### 95^th^ st. 2022
+
+``` {r solids_summary_95}
+
+# get max tss loading for each system 95th st 2022 (overlapping batches where appropriate)
+tss.system.95 <- system.parameters.95 %>%
+  group_by(system, facility_day) %>%
+  summarise(tss.sum = sum(total.tss)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility loading
+tss.facility.95 <- system.parameters.95 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tss.sum = sum(total.tss)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum))
+
+# get max tss loading for individual system processes 95th st 2022
+tss.process.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(tss.p.max = max(process.tss),
+            tss.p.avg = mean(process.tss)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# perform clearwater calcs for comparison
+tss.facility.clearwater.95 <- system.parameters.95 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tss.sum = sum(total.tss.clearwater)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum))
+
+tss.process.clearwater.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(tss.p.max = max(process.tss.clearwater),
+            tss.p.avg = mean(process.tss.clearwater)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join facility tables
+tss.facility.summary.95 <-
+  bind_cols(tss.facility.clearwater.95, tss.facility.95)
+
+tss.process.summary.95 <-
+  left_join(tss.process.clearwater.95, tss.process.95, by = "system")
+
+# join tss summary tibbles 95th st 2022
+tss.summary.95 <- left_join(tss.system.95, tss.process.95, by = "system")
+```
+
+``` {r FacilityTssLoadingTable95, ft.align = "center"}
+
+tss.facility.summary.95 %>%
+  flextable() %>%
+  set_header_labels(tss.s.max...1 = "Max TSS CW", tss.s.avg...2 = "Avg TSS CW ", tss.s.max...3 = "Max TSS BF", tss.s.avg...4 = "Avg TSS BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Facility loading rates (Kg/day TSS modelled for clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TssLoadingTable95, ft.align = "center"}
+
+tss.process.summary.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", tss.p.max.x = "Max TSS CW", tss.p.avg.x = "Avg TSS CW", tss.p.max.y = "Max TSS BF", tss.p.avg.y = "Avg TSS BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System loading rates (Kg/day TSS modelled for clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 95^th^ st. 2023
+
+``` {r solids_summary_primo}
+
+# get max tss loading for each system 95th st 2023 (overlapping batches where appropriate)
+tss.system.primo <- system.parameters.primo %>%
+  group_by(system, facility_day) %>%
+  summarise(tss.sum = sum(total.tss)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility loading
+tss.facility.primo <- system.parameters.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tss.sum = sum(total.tss)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum))
+
+# get max tss loading for individual system processes 95th st 2023
+tss.process.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(tss.p.max = max(process.tss),
+            tss.p.avg = mean(process.tss)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# perform clearwater calcs for comparison
+tss.facility.clearwater.primo <- system.parameters.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tss.sum = sum(total.tss.clearwater)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum))
+
+tss.process.clearwater.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(tss.p.max = max(process.tss.clearwater),
+            tss.p.avg = mean(process.tss.clearwater)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join facility tables
+tss.facility.summary.primo <-
+  bind_cols(tss.facility.clearwater.primo, tss.facility.primo)
+
+tss.process.summary.primo <-
+  left_join(tss.process.clearwater.primo, tss.process.primo, by = "system")
+
+# join tss summary tibbles 95th st 2023
+tss.summary.primo <- left_join(tss.system.primo, tss.process.primo, by = "system")
+```
+
+``` {r FacilityTssLoadingTablePrimo, ft.align = "center"}
+
+tss.facility.summary.primo %>%
+  flextable() %>%
+  set_header_labels(tss.s.max...1 = "Max TSS CW", tss.s.avg...2 = "Avg TSS CW ", tss.s.max...3 = "Max TSS BF", tss.s.avg...4 = "Avg TSS BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 Facility loading rates (Kg/day TSS modelled for clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TssLoadingTable_Primo, ft.align = "center"}
+
+tss.process.summary.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", tss.p.max.x = "Max TSS CW", tss.p.avg.x = "Avg TSS CW", tss.p.max.y = "Max TSS BF", tss.p.avg.y = "Avg TSS BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System loading rates (Kg/day TSS modelled for clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 101^st^ st. 2024
+
+``` {r solids_summary_101}
+
+# get max tss loading for each system 101th st 2024 (overlapping batches where appropriate)
+tss.system.101 <- system.parameters.101 %>%
+  group_by(system, facility_day) %>%
+  summarise(tss.sum = sum(total.tss)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility loading
+tss.facility.101 <- system.parameters.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tss.sum = sum(total.tss)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum))
+
+# get max tss loading for individual system processes 101st st 2024 4 raceway batch
+tss.process.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(tss.p.max.a = max(process.tss),
+            tss.p.avg.a = mean(process.tss)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max tss loading for individual system processes 101st st 2024 6 raceway batch
+tss.process.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(tss.p.max.b = max(process.tss),
+            tss.p.avg.b = mean(process.tss)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join tss summary tibbles 101st st 2024
+tss.summary.101 <- left_join(tss.process.101a, tss.process.101b, by = "system")
+
+# perform clearwater calcs for comparison
+tss.facility.clearwater.101 <- system.parameters.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(tss.sum = sum(total.tss.clearwater)) %>%
+  summarise(tss.s.max = max(tss.sum),
+            tss.s.avg = mean(tss.sum))
+
+
+# get max tss loading for individual system processes 101st st 2024 4 raceway batch
+tss.process.clearwater.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(tss.p.max.a = max(process.tss.clearwater),
+            tss.p.avg.a = mean(process.tss.clearwater)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max tss loading for individual system processes 101st st 2024 4 raceway batch
+tss.process.clearwater.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(tss.p.max.b = max(process.tss.clearwater),
+            tss.p.avg.b = mean(process.tss.clearwater)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join facility tables
+tss.facility.summary.101 <-
+  bind_cols(tss.facility.clearwater.101, tss.facility.101)
+
+tss.process.summary.cw.101 <-
+  left_join(tss.process.clearwater.101a, tss.process.clearwater.101b, by = "system")
+```
+
+``` {r FacilityTssLoadingTable101, ft.align = "center"}
+
+tss.facility.summary.101 %>%
+  flextable() %>%
+  set_header_labels(tss.s.max...1 = "Max TSS CW", tss.s.avg...2 = "Avg TSS CW ", tss.s.max...3 = "Max TSS BF", tss.s.avg...4 = "Avg TSS BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Facility loading rates (Kg/day TSS modelled for clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TssLoadingTableCW101, ft.align = "center"}
+
+tss.process.summary.cw.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", tss.p.max.a = "System max TSS A", tss.p.avg.a = "System avg TSS A", tss.p.max.b = "System max TSS B", tss.p.avg.b = "System avg TSS B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System loading rates (Kg/day modelled for clearwater operation)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r TssLoadingTableBF101, ft.align = "center"}
+
+tss.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", tss.p.max.a = "System max TSS A", tss.p.avg.a = "System avg TSS A", tss.p.max.b = "System max TSS B", tss.p.avg.b = "System avg TSS B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System loading rates (Kg/day modelled for biofloc operation)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+A cumulative TSS sum may give an indication of the timing within the production run that the desired TSS will be achieved. From this point onwards, solids will require either continuous or periodic removal to maintain TSS within acceptable limits.
+
+Calculations based upon full tanks:
+
+``` {r tank_volumes}
+
+# tank volumes
+nursery.tank <- 15
+raceway.tank <- 80
+raceway.tank.101 <- 60
+purging.unit <- 5 * 4
+packing.volume <- 15.6
+```
+
+* Nursery `r format(nursery.tank, scientific = FALSE)` m^3^
+* Juvenile (95^th^ 2022) `r format(raceway.tank, scientific = FALSE)` m^3^
+* Growout `r format(raceway.tank, scientific = FALSE)` m^3^
+
+### 95^th^ st. 2022
+
+``` {r tss_cumsum_95}
+
+# get cumulative sum grouped by system 95th st 2022
+cumulative.tss.95 <- system.parameters.95 %>%
+  group_by(system, batch) %>%
+  mutate(cs = cumsum(process.tss),
+         cumulative.tss = case_when(system == "juvenile"  ~ cs * 1e6 / (1000 * raceway.tank),
+                                    system == "growout" ~ cs * 1e6 / (1000 * raceway.tank),
+                                    system == "nursery" ~ cs * 1e6 / (1000 * nursery.tank),
+                                    TRUE ~ 0),
+         total.drum.flow = abs(total.tss * 1e6 / (tss.c2 - tss.c1) / 24 / 1000),
+         process.drum.flow = abs(process.tss * 1e6 / (tss.c2 - tss.c1) / 24 / 1000),
+         total.drum.flow.cw = abs(total.tss.clearwater * 1e6 / (tss.c2.cw - tss.c1.cw) / 24 / 1000),
+         process.drum.flow.cw = abs(process.tss.clearwater * 1e6 / (tss.c2.cw - tss.c1.cw) / 24 / 1000),
+         total.drum.water.use.cw = total.feed.kg * 200 / 1000,
+         process.drum.water.use.cw = process.feed.kg * 200 / 1000,
+         total.drum.water.use.bf = case_when(system == "nursery" | system == "juvenile" | system == "growout" ~ total.tss / total.tss.clearwater * total.feed.kg * 50 / 1000, TRUE ~ 0),
+         process.drum.water.use.bf = process.tss / process.tss.clearwater * process.feed.kg * 50 / 1000)
+```
+
+``` {r TssCumplot95, fig.cap = "95^th^ st. 2022 Cumulative TSS accumulation - without solids management (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot cumulative tss loading across batch run 95th st 2022
+tss.cumplot.95 <- cumulative.tss.95 %>%
+  filter(batch == "lag.batch.0" & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(batch_day, cumulative.tss, color = system)) +
+  geom_line()+
+  geom_hline(yintercept=250, linetype="dashed", color = "darkgrey") + 
+  scale_color_manual("", breaks = c("nursery", "juvenile", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Juvenile", "Growout")) +
+  labs(x = "Day", y = "Cumulative TSS (mg/l)") + 
+  theme_minimal()
+
+tss.cumplot.95
+```
+
+### 95^th^ st. 2023
+
+``` {r tss_cumsum_primo}
+
+# get cumulative sum grouped by system 95th st 2023
+cumulative.tss.primo <- system.parameters.primo %>%
+  group_by(system, batch) %>%
+  mutate(cs = cumsum(process.tss),
+         cumulative.tss = case_when(system == "growout" ~ cs * 1e6 / (1000 * raceway.tank),
+                                    system == "nursery" ~ cs * 1e6 / (1000 * raceway.tank),
+                                    TRUE ~ 0),
+         total.drum.flow = abs(total.tss * 1e6 / (tss.c2 - tss.c1) / 24 / 1000),
+         process.drum.flow = abs(process.tss * 1e6 / (tss.c2 - tss.c1) / 24 / 1000),
+         total.drum.flow.cw = abs(total.tss.clearwater * 1e6 / (tss.c2.cw - tss.c1.cw) / 24 / 1000),
+         process.drum.flow.cw = abs(process.tss.clearwater * 1e6 / (tss.c2.cw - tss.c1.cw) / 24 / 1000),
+         total.drum.water.use.cw = total.feed.kg * 200 / 1000,
+         process.drum.water.use.cw = process.feed.kg * 200 / 1000,
+         total.drum.water.use.bf = total.tss / total.tss.clearwater * total.feed.kg * 50 / 1000,
+         process.drum.water.use.bf = process.tss / process.tss.clearwater * process.feed.kg * 50 / 1000)
+```
+
+``` {r TssCumplotPrimo, fig.cap = "95^th^ st. 2023 Cumulative TSS accumulation - without solids management (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot cumulative tss loading across batch run 95th st 2023
+tss.cumplot.primo <- cumulative.tss.primo %>%
+  filter(batch == "lag.batch.0" & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(batch_day, cumulative.tss, color = system)) +
+  geom_line()+
+  geom_hline(yintercept=250, linetype="dashed", color = "darkgrey") +
+  scale_color_manual("", breaks = c("nursery", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Growout")) +
+  labs(x = "Day", y = "Cumulative TSS (mg/l)") + 
+  theme_minimal()
+
+tss.cumplot.primo
+```
+
+### 101^st^ st. 2024
+
+``` {r tss_cumsum_101}
+
+# get cumulative sum grouped by system 101st st 2024
+cumulative.tss.101 <- system.parameters.101 %>%
+  group_by(system, batch) %>%
+  mutate(cs = cumsum(process.tss),
+         cumulative.tss = case_when(system == "growout" ~ cs * 1e6 / (1000 * raceway.tank.101),
+                                    system == "nursery" ~ cs * 1e6 / (1000 * raceway.tank.101),
+                                    TRUE ~ 0),
+         total.drum.flow = abs(total.tss * 1e6 / (tss.c2 - tss.c1) / 24 / 1000),
+         process.drum.flow = abs(process.tss * 1e6 / (tss.c2 - tss.c1) / 24 / 1000),
+         total.drum.flow.cw = abs(total.tss.clearwater * 1e6 / (tss.c2.cw - tss.c1.cw) / 24 / 1000),
+         process.drum.flow.cw = abs(process.tss.clearwater * 1e6 / (tss.c2.cw - tss.c1.cw) / 24 / 1000),
+         total.drum.water.use.cw = total.feed.kg * 200 / 1000,
+         process.drum.water.use.cw = process.feed.kg * 200 / 1000,
+         total.drum.water.use.bf = total.tss / total.tss.clearwater * total.feed.kg * 50 / 1000,
+         process.drum.water.use.bf = process.tss / process.tss.clearwater * process.feed.kg * 50 / 1000)
+```
+
+``` {r TssCumplot101, fig.cap = "101^st^ st. 2024 Cumulative TSS accumulation - without solids management (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot cumulative tss loading across batch run 101st st 2024
+tss.cumplot.101 <- cumulative.tss.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1") & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(facility_day, cumulative.tss, color = system)) +
+  geom_line()+
+  geom_hline(yintercept=250, linetype="dashed", color = "darkgrey") +
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("nursery", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Growout")) +
+  labs(x = "Day", y = "Cumulative TSS (mg/l)") + 
+  theme_minimal()
+
+tss.cumplot.101
+```
+
+Drum Filter Flow Requirements/ or other solids removal device operating at `r tss.te * 100`% efficiency:
+
+### 95^th^ st. 2022.
+
+``` {r DrumFlowplot95, fig.cap = "95^th^ st. 2022 Drum filter flow requirements to maintain 250 mg/l TSS (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot drum filter flow requirement 95th 2022
+drum.flowplot.95 <- cumulative.tss.95 %>%
+  filter(batch == "lag.batch.0" & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(batch_day, process.drum.flow, color = system)) +
+  geom_line()+ 
+  scale_color_manual("", breaks = c("nursery", "juvenile", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Juvenile", "Growout")) +
+  labs(x = "Day", y = expression(paste("Drum Filter ", (m^3/hr)))) + 
+  theme_minimal()
+
+drum.flowplot.95
+```
+
+### 95^th^ st. 2023.
+
+``` {r DrumFlowplotPrimo, fig.cap = "95^th^ st. 2023 Drum filter flow requirements to maintain 250 mg/l TSS (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot drum filter flow requirement 95th 2023
+drum.flowplot.primo <- cumulative.tss.primo %>%
+  filter(batch == "lag.batch.0" & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(batch_day, process.drum.flow, color = system)) +
+  geom_line()+ 
+  scale_color_manual("", breaks = c("nursery", "juvenile", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Juvenile", "Growout")) +
+  labs(x = "Day", y = expression(paste("Drum Filter ", (m^3/hr)))) + 
+  theme_minimal()
+
+drum.flowplot.primo
+```
+
+### 101^st^ st. 2024.
+
+``` {r DrumFlowplot101, fig.cap = "101^st^ st. 2024 Drum filter flow requirements to maintain 250 mg/l TSS (per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot drum filter flow requirement 101st 2024
+drum.flowplot.101 <- cumulative.tss.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1") & !system %in% c("quarantine", "depurate")) %>%
+  ggplot(aes(facility_day, process.drum.flow, color = system)) +
+  geom_line()+
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("nursery", "growout"),
+                     values = c(system_cols),
+                     labels = c("Nursery", "Growout")) +
+  labs(x = "Day", y = expression(paste("Drum Filter ", (m^3/hr)))) + 
+  theme_minimal()
+
+drum.flowplot.101
+```
+
+Drum Filter Water Usage
+
+Drum filter water usage calculations based upon 50 litres consumed for cleaning per kilo of feed supplied (under normal fish farm conditions). Adjusted here to reflect additional bacterial biomass produced under biofloc conditions.
+
+### 95^th^ st. 2022
+
+``` {r drum_useage_95}
+
+# get drum water usage per day for each system 95th st 2022 (overlapping batches where appropriate)
+
+# ignore the above and get a facility sum
+drum.use.facility.95 <- cumulative.tss.95 %>%
+  drop_na() %>%
+  filter(!system %in% c("quarantine", "depurate")) %>%
+  group_by(facility_day) %>%
+  summarise(total.drum.use.sum = sum(total.drum.water.use.bf)) %>%
+  summarise(drum.use.s.max = max(total.drum.use.sum),
+            drum.use.s.avg = mean(total.drum.use.sum))
+
+# ignore the above and get a facility sum
+drum.use.facility.cw.95 <- cumulative.tss.95 %>%
+  filter(!system %in% c("quarantine", "depurate")) %>%
+  group_by(facility_day) %>%
+  summarise(total.drum.use.sum = sum(total.drum.water.use.cw)) %>%
+  summarise(drum.use.s.max = max(total.drum.use.sum),
+            drum.use.s.avg = mean(total.drum.use.sum))
+
+drum.facility.use.95 <-
+  bind_cols(drum.use.facility.cw.95, drum.use.facility.95)
+
+# get drum water usage for individual system processes 95th st 2022
+drum.use.process.95 <- cumulative.tss.95 %>%
+  drop_na() %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max = max(process.drum.water.use.bf),
+            drum.use.p.avg = mean(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get drum water usage for individual system processes 95th st 2022
+drum.use.process.cw.95 <- cumulative.tss.95 %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max = max(process.drum.water.use.cw),
+            drum.use.p.avg = mean(process.drum.water.use.cw)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join drum water usage summary tibbles 95th st 2022
+drum.use.summary.combined.95 <- left_join(drum.use.process.cw.95,
+                                 drum.use.process.95,
+                                 by = "system") %>%
+  filter(!system %in% c("quarantine", "depurate"))
+```
+
+``` {r FacilityDrumUseTable95, ft.align = "center"}
+
+drum.facility.use.95 %>%
+  flextable() %>%
+  set_header_labels(drum.use.s.max...1 = "Max Volume CW", drum.use.s.avg...2 = "Avg Volume CW", drum.use.s.max...3 = "Max Volume BF", drum.use.s.avg...4 = "Avg Volume BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Estimated facility drum filter water use m", as_sup("3"), "/day (clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r DrumUseageTable95, ft.align = "center"}
+
+drum.use.summary.combined.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", drum.use.p.max.x = "Max Use CW", drum.use.p.avg.x = "Avg Use CW", drum.use.p.max.y = "Max Use BF", drum.use.p.avg.y = "Avg Use BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System drum filter water use m", as_sup("3"), "/day."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 95^th^ st. 2023
+
+``` {r drum_usage_primo}
+
+# get drum water usage  for each system 95th st 2023 (overlapping batches where appropriate)
+
+# ignore the above and get a facility sum
+drum.use.facility.primo <- cumulative.tss.primo %>%
+  drop_na() %>%
+  filter(!system %in% c("quarantine", "depurate")) %>%
+  group_by(facility_day) %>%
+  summarise(total.drum.use.sum = sum(total.drum.water.use.bf)) %>%
+  summarise(drum.use.s.max = max(total.drum.use.sum),
+            drum.use.s.avg = mean(total.drum.use.sum))
+
+# ignore the above and get a facility sum
+drum.use.facility.cw.primo <- cumulative.tss.primo %>%
+  filter(!system %in% c("quarantine", "depurate")) %>%
+  group_by(facility_day) %>%
+  summarise(total.drum.use.sum = sum(total.drum.water.use.cw)) %>%
+  summarise(drum.use.s.max = max(total.drum.use.sum),
+            drum.use.s.avg = mean(total.drum.use.sum))
+
+drum.facility.use.primo <-
+  bind_cols(drum.use.facility.cw.primo, drum.use.facility.primo)
+
+# get drum water usage for individual system processes 95th st 2022
+drum.use.process.primo <- cumulative.tss.primo %>%
+  drop_na() %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max = max(process.drum.water.use.bf),
+            drum.use.p.avg = mean(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get drum water usage for individual system processes 95th st 2022
+drum.use.process.cw.primo <- cumulative.tss.primo %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max = max(process.drum.water.use.cw),
+            drum.use.p.avg = mean(process.drum.water.use.cw)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join drum water usage summary tibbles 95th st 2022
+drum.use.summary.combined.primo <- left_join(drum.use.process.cw.primo,
+                                 drum.use.process.primo,
+                                 by = "system") %>%
+  filter(!system %in% c("quarantine", "depurate"))
+
+# get drum water usage for individual system processes 95th st 2023
+```
+
+``` {r FacilityDrumUseTablePrimo, ft.align = "center"}
+
+drum.facility.use.primo %>%
+  flextable() %>%
+  set_header_labels(drum.use.s.max...1 = "Max Use CW", drum.use.s.avg...2 = "Avg Use CW", drum.use.s.max...3 = "Max Use BF", drum.use.s.avg...4 = "Avg Use BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 Estimated facility drum filter water use m", as_sup("3"), "/day (clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r DrumUseageTablePrimo, ft.align = "center"}
+
+drum.use.summary.combined.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", drum.use.p.max.x = "Max Use CW", drum.use.p.avg.x = "Avg Use CW", drum.use.p.max.y = "Max Use BF", drum.use.p.avg.y = "Avg Use BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System drum filter water use m", as_sup("3"), "/day (clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 101^st^ st. 2024
+
+``` {r drum_usage_101}
+
+# get max drum water usage for each system 101th st 2024 (overlapping batches where appropriate)
+
+
+# ignore the above and get a facility sum 101
+drum.use.facility.101 <- cumulative.tss.101 %>%
+  drop_na() %>%
+  filter(!system %in% c("quarantine", "depurate")) %>%
+  group_by(facility_day) %>%
+  summarise(total.drum.use.sum = sum(total.drum.water.use.bf)) %>%
+  summarise(drum.use.s.max = max(total.drum.use.sum),
+            drum.use.s.avg = mean(total.drum.use.sum))
+
+# ignore the above and get a facility sum
+drum.use.facility.cw.101 <- cumulative.tss.101 %>%
+  filter(!system %in% c("quarantine", "depurate")) %>%
+  group_by(facility_day) %>%
+  summarise(total.drum.use.sum = sum(total.drum.water.use.cw)) %>%
+  summarise(drum.use.s.max = max(total.drum.use.sum),
+            drum.use.s.avg = mean(total.drum.use.sum))
+
+drum.facility.use.101 <-
+  bind_cols(drum.use.facility.cw.101, drum.use.facility.101)
+
+
+# get max drum water usage for individual system processes 101st st 2024 4 raceway batch
+drum.use.process.101a <- cumulative.tss.101 %>%
+  drop_na() %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max.a = max(process.drum.water.use.bf),
+            drum.use.p.avg.a = mean(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max drum water usage for individual system processes 101st st 2024 6 raceway batch
+drum.use.process.101b <- cumulative.tss.101 %>%
+  drop_na() %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max.b = max(process.drum.water.use.bf),
+            drum.use.p.avg.b = mean(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join drum water usage summary tibbles 101st st 2024
+drum.use.summary.101 <- left_join(drum.use.process.101a,
+                                  drum.use.process.101b,
+                                  by = "system") %>% 
+  filter(!system %in% c("quarantine", "depurate"))
+
+# get max drum water usage for individual system processes 101st st 2024 4 raceway batch CW
+drum.use.process.cw.101a <- cumulative.tss.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max.a = max(process.drum.water.use.cw),
+            drum.use.p.avg.a = mean(process.drum.water.use.cw)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max drum water usage for individual system processes 101st st 2024 6 raceway batch
+drum.use.process.cw.101b <- cumulative.tss.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(drum.use.p.max.b = max(process.drum.water.use.cw),
+            drum.use.p.avg.b = mean(process.drum.water.use.cw)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join drum water usage summary tibbles 101st st 2024
+drum.use.summary.cw.101 <- left_join(drum.use.process.cw.101a,
+                                  drum.use.process.cw.101b,
+                                  by = "system") %>% 
+  filter(!system %in% c("quarantine", "depurate"))
+```
+
+``` {r FacilityDrumUseTable101, ft.align = "center"}
+
+drum.facility.use.101 %>%
+  flextable() %>%
+  set_header_labels(drum.use.s.max...1 = "Max Use CW", drum.use.s.avg...2 = "Avg Use CW", drum.use.s.max...3 = "Max Use BF", drum.use.s.avg...4 = "Avg Use BF") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Facility drum filter water use m", as_sup("3"), "/day (clearwater CW and biofloc BF)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r DrumUsageTableCW101, ft.align = "center"}
+
+drum.use.summary.cw.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", drum.use.p.max.a = "Max Use A", drum.use.p.avg.a = "Avg Use A", drum.use.p.max.b = "Max Use B", drum.use.p.avg.b = "Avg Use B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Estimated system drum filter water use (as clearwater system) m", as_sup("3"), "/day."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r DrumUsageTable101, ft.align = "center"}
+
+drum.use.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", drum.use.p.max.a = "Max Use A", drum.use.p.avg.a = "Avg Use A", drum.use.p.max.b = "Max Use B", drum.use.p.avg.b = "Avg Use B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Estimated system drum filter water use (as biofloc system) m", as_sup("3"), "/day."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r drum_sum_95}
+
+# calculate sum of drum filter water use across system/ batch 95th st 2022
+drum.sum.95 <- cumulative.tss.95 %>%
+  drop_na() %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(drum.sum = sum(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+```
+
+``` {r drum_sum_primo}
+
+# calculate sum of drum filter water use across system/ batch 95th st 2023
+drum.sum.primo <- cumulative.tss.primo %>%
+  drop_na() %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(drum.sum = sum(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+```
+
+``` {r drum_sum_101}
+
+# calculate sum of drum filter water use across system/ batch 101st st 2024 4 tank strategy
+drum.sum.101.a <- cumulative.tss.101 %>%
+  drop_na() %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(drum.sum = sum(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# calculate sum of drum filter water use across system/ batch 101st st 2024 6 tank strategy
+drum.sum.101.b <- cumulative.tss.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(drum.sum = sum(process.drum.water.use.bf)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+```
+
+***
+
+## Oxygen
+
+Oxygen demand - for specification of emergency oxygen requirements/ oxygen supply systems or air supply volume (air volumes estimated with a 5% oxygen transfer efficiency rate)
+
+### 95^th^ st. 2022.
+
+``` {r oxygen_demand_95}
+
+# get max oxygen demand for each system 95th st 2022 (overlapping batches where appropriate)
+oxy.system.95 <- system.parameters.95 %>%
+  group_by(system, facility_day) %>%
+  summarise(oxy.sum = sum(total.od)) %>%
+  summarise(oxy.s.max = max(oxy.sum),
+            oxy.s.avg = mean(oxy.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore above and get facility loading
+oxy.facility.95 <- system.parameters.95 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(oxy.sum = sum(total.od)) %>%
+  summarise(oxy.s.max = max(oxy.sum),
+            oxy.s.avg = mean(oxy.sum))
+
+# get max oxygen demand for individual system processes 95th st 2022
+oxy.process.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(oxy.p.max = max(process.od),
+            oxy.p.avg = mean(process.od)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+air.process.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(oxy.p.max = max(process.od / (0.26 * 0.05)),
+            oxy.p.avg = mean(process.od / (0.26 * 0.05))) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join oxygen demand summary tibbles 95th st 2022
+oxy.summary.95 <- left_join(oxy.system.95, oxy.process.95, by = "system")
+```
+
+``` {r FacilityOxyUseTable95, ft.align = "center"}
+
+oxy.facility.95 %>%
+  flextable() %>%
+  set_header_labels(oxy.s.max = "Max oxy", oxy.s.avg = "Avg oxy") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Facility oxygen requirement (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r OdTable95, ft.align = "center"}
+
+oxy.process.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", oxy.p.max = "System max OD", oxy.p.avg = "System avg OD") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System oxygen demand (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AirTable95, ft.align = "center"}
+
+air.process.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", oxy.p.max = "Max air demand", oxy.p.avg = "Avg air demand") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System air demand to supply required oxygen m", as_sup("3"), "/day."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 95^th^ st. 2023.
+
+``` {r oxygen_demand_primo}
+
+# get max oxygen demand for each system 95th st 2023 (overlapping batches where appropriate)
+oxy.system.primo <- system.parameters.primo %>%
+  group_by(system, facility_day) %>%
+  summarise(oxy.sum = sum(total.od)) %>%
+  summarise(oxy.s.max = max(oxy.sum),
+            oxy.s.avg = mean(oxy.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore above and get facility loading
+oxy.facility.primo <- system.parameters.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(oxy.sum = sum(total.od)) %>%
+  summarise(oxy.s.max = max(oxy.sum),
+            oxy.s.avg = mean(oxy.sum))
+
+# get max oxygen demand for individual system processes 95th st 2023
+oxy.process.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(oxy.p.max = max(process.od),
+            oxy.p.avg = mean(process.od)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+air.process.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(oxy.p.max = max(process.od / (0.26 * 0.05)),
+            oxy.p.avg = mean(process.od / (0.26 * 0.05))) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join oxygen demand summary tibbles 95th st 2023
+oxy.summary.primo <- left_join(oxy.system.primo, oxy.process.primo, by = "system")
+```
+
+``` {r FacilityOxyUseTablePrimo, ft.align = "center"}
+
+oxy.facility.primo %>%
+  flextable() %>%
+  set_header_labels(oxy.s.max = "Max oxy", oxy.s.avg = "Avg oxy") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 Facility oxygen requirement (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r OdTablePrimo, ft.align = "center"}
+
+oxy.process.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", oxy.p.max = "System max OD", oxy.p.avg = "System avg OD") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System oxygen demand (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AirTablePrimo, ft.align = "center"}
+
+air.process.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", oxy.p.max = "Max air demand", oxy.p.avg = "Avg air demand") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System air demand to supply required oxygen m", as_sup("3"), "/day."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 101^st^ st. 2024.
+
+``` {r oxygen_demand_101}
+
+# get max oxygen demand loading for each system 101th st 2024 (overlapping batches where appropriate)
+oxy.system.101 <- system.parameters.101 %>%
+  group_by(system, facility_day) %>%
+  summarise(oxy.sum = sum(total.od)) %>%
+  summarise(oxy.s.max = max(oxy.sum),
+            oxy.s.avg = mean(oxy.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore above and get facility loading
+oxy.facility.101 <- system.parameters.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(oxy.sum = sum(total.od)) %>%
+  summarise(oxy.s.max = max(oxy.sum),
+            oxy.s.avg = mean(oxy.sum))
+
+# get max oxygen demand loading for individual system processes 101st st 2024 4 raceway batch
+oxy.process.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(oxy.p.max.a = max(process.od),
+            oxy.p.avg.a = mean(process.od)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max oxygen demand loading for individual system processes 101st st 2024 6 raceway batch
+oxy.process.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(oxy.p.max.b = max(process.od),
+            oxy.p.avg.b = mean(process.od)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+air.process.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(oxy.p.max.a = max(process.od) / (0.26 * 0.05),
+            oxy.p.avg.a = mean(process.od) / (0.26 * 0.05)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+air.process.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(oxy.p.max.b = max(process.od) / (0.26 * 0.05),
+            oxy.p.avg.b = mean(process.od) / (0.26 * 0.05)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join oxygen demand summary tibbles 101st st 2024
+oxy.summary.101 <- left_join(oxy.process.101a, oxy.process.101b, by = "system")
+
+air.summary.101 <- left_join(air.process.101a, air.process.101b, by = "system")
+```
+
+``` {r FacilityOxyUseTable101, ft.align = "center"}
+
+oxy.facility.101 %>%
+  flextable() %>%
+  set_header_labels(oxy.s.max = "Max oxy", oxy.s.avg = "Avg oxy") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Facility oxygen requirement (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r OdTable101, ft.align = "center"}
+
+oxy.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", oxy.p.max.a = "System max OD A", oxy.p.avg.a = "System avg OD A", oxy.p.max.b = "System max OD B", oxy.p.avg.b = "System avg OD B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System oxygen demand (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AirTable101, ft.align = "center"}
+
+air.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", oxy.p.max.a = "Max air demand A", oxy.p.avg.a = "Avg air demand", oxy.p.max.b = "Max air demand B", oxy.p.avg.b = "Avg air demand B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System air demand to supply required oxygen m", as_sup("3"), "/day."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+***
+
+## Alkalinity
+
+For every g of ammonia-nitrogen converted to nitrate-nitrogen (chemoautotrophic pathway), 7.05 g of alkalinity (1.69 g inorganic carbon) is consumed.
+
+For every g of ammonia-nitrogen converted to microbial biomass (heterotrophic pathway), 3.57 g of alkalinity (0.86 g inorganic carbon) is consumed.
+
+Alkalinity also plays a role in pH buffering capacity
+
+The following tables indicate the average and maximum alkalinity demands and will be followed by charts predicting daily alkalinity consumption in tanks/ process units.
+
+### 95^th^ st. 2022
+
+``` {r alkalinity_demand_95}
+
+# get max alkalinity demand for each system 95th st 2022 (overlapping batches where appropriate)
+alk.system.95 <- system.parameters.95 %>%
+  group_by(system, facility_day) %>%
+  summarise(alk.sum = sum(total.alk)) %>%
+  summarise(alk.s.max = max(alk.sum),
+            alk.s.avg = mean(alk.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility requirement
+alk.facility.95 <- system.parameters.95 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(alk.sum = sum(total.alk)) %>%
+  summarise(alk.s.max = max(alk.sum),
+            alk.s.avg = mean(alk.sum))
+
+# get max alkalinity demand for individual system processes 95th st 2022
+alk.process.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(alk.p.max = max(process.alk),
+            alk.p.avg = mean(process.alk)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join alkalinity demand summary tibbles 95th st 2022
+alk.summary.95 <- left_join(alk.system.95, alk.process.95, by = "system")
+```
+
+``` {r FacilityAlkDemandTable95, ft.align = "center"}
+
+alk.facility.95 %>%
+  flextable() %>%
+  set_header_labels(alk.s.max = "Max Alk", alk.s.avg = "Avg Alk") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Facility alkalinity requirement (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AlkDemandTable95, ft.align = "center"}
+
+alk.process.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", alk.p.max = "System max Alk", alk.p.avg = "System avg Alk") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System alkalinity demand (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AlkProfile95, fig.cap = "95^th^ st. 2022 Theoretical supplimentary alkalinity requirement (kg per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot alkalinity requirement across batch run 95th st 2022
+tank.alk.95 <- system.parameters.95 %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, process.alk, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Day", y = "Supplimentary alkalinity required (kg per day)") + 
+  theme_minimal()
+
+tank.alk.95
+```
+
+### 95^th^ st. 2023
+
+``` {r alkalinity_demand_primo}
+
+# get max alkalinity demand for each system 95th st 2023 (overlapping batches where appropriate)
+alk.system.primo <- system.parameters.primo %>%
+  group_by(system, facility_day) %>%
+  summarise(alk.sum = sum(total.alk)) %>%
+  summarise(alk.s.max = max(alk.sum),
+            alk.s.avg = mean(alk.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility requirement
+alk.facility.primo <- system.parameters.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(alk.sum = sum(total.alk)) %>%
+  summarise(alk.s.max = max(alk.sum),
+            alk.s.avg = mean(alk.sum))
+
+# get max alkalinity demand for individual system processes 95th st 2023
+alk.process.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(alk.p.max = max(process.alk),
+            alk.p.avg = mean(process.alk)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join alkalinity demand summary tibbles 95th st 2023
+alk.summary.primo <- left_join(alk.system.primo, alk.process.primo, by = "system")
+```
+
+``` {r FacilityAlkDemandTablePrimo, ft.align = "center"}
+
+alk.facility.primo %>%
+  flextable() %>%
+  set_header_labels(alk.s.max = "Max Alk", alk.s.avg = "Avg Alk") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 Facility alkalinity requirement (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AlkDemandTablePrimo, ft.align = "center"}
+
+alk.process.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", alk.p.max = "System max Alk", alk.p.avg = "System avg Alk") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System alkalinity demand (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AlkProfilePrimo, fig.cap = "95^th^ st. 2023 Theoretical supplimentary alkalinity requirement (kg per System).", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot alkalinity requirement across batch run 95th st 2023
+tank.alk.primo <- system.parameters.primo %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, process.alk, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery","Growout", "Depurate")) +
+  labs(x = "Day", y = "Supplimentary alkalinity required (kg per day)") + 
+  theme_minimal()
+
+tank.alk.primo
+```
+
+### 101^st^ st. 2024
+
+``` {r alkalinity_demand_101}
+
+# get max alkalinity demand for each system 101th st 2024 (overlapping batches where appropriate)
+alk.system.101 <- system.parameters.101 %>%
+  group_by(system, facility_day) %>%
+  summarise(alk.sum = sum(total.alk)) %>%
+  summarise(alk.s.max = max(alk.sum),
+            alk.s.avg = mean(alk.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore the above and get facility requirement
+alk.facility.101 <- system.parameters.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(alk.sum = sum(total.alk)) %>%
+  summarise(alk.s.max = max(alk.sum),
+            alk.s.avg = mean(alk.sum))
+
+# get max alkalinity demand for individual system processes 101st st 2024 4 raceway batch
+alk.process.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(alk.p.max.a = max(process.alk),
+            alk.p.avg.a = mean(process.alk)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max alkalinity demand for individual system processes 101st st 2024 6 raceway batch
+alk.process.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(alk.p.max.b = max(process.alk),
+            alk.p.avg.b = mean(process.alk)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join alkalinity demand summary tibbles 101st st 2024
+alk.summary.101 <- left_join(alk.process.101a, alk.process.101b, by = "system")
+```
+
+``` {r FacilityAlkDemandTable101, ft.align = "center"}
+
+alk.facility.101 %>%
+  flextable() %>%
+  set_header_labels(alk.s.max = "Max Alk", alk.s.avg = "Avg Alk") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Facility alkalinity requirement (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AlkDemandTable101, ft.align = "center"}
+
+alk.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", alk.p.max.a = "System max Alk A", alk.p.avg.a = "System avg Alk A", alk.p.max.b = "System max Alk B", alk.p.avg.b = "System avg Alk B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System alkalinity demand (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r AlkProfile101, fig.cap = "101^st^ st. 2024 Theoretical supplimentary alkalinity requirement (kg per System.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot alkalinity requirement across batch run 101st st 2024
+tank.alk.101 <- system.parameters.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1")) %>%
+  ggplot(aes(facility_day, process.alk, color = system)) +
+  geom_line()+
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery","Growout", "Depurate")) +
+  labs(x = "Day", y = "Supplimentary alkalinity required (kg per day)") + 
+  theme_minimal()
+
+tank.alk.101
+```
+
+***
+
+## CO~2~
+
+Literature suggests dissolved CO~2~ should remain below 7mg/l - 10mg/l
+
+Tables below summarise daily CO~2~ production for overall facility and tank/ process units
+
+### 95^th^ st. 2022
+
+``` {r co2_produced_95}
+
+# get max co2 produced for each system 95th st 2022 (overlapping batches where appropriate)
+co2.system.95 <- system.parameters.95 %>%
+  group_by(system, facility_day) %>%
+  summarise(co2.sum = sum(total.co2)) %>%
+  summarise(co2.s.max = max(co2.sum),
+            co2.s.avg = mean(co2.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore above and calculate facility figure
+co2.facility.95 <- system.parameters.95 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(co2.sum = sum(total.co2)) %>%
+  summarise(co2.s.max = max(co2.sum),
+            co2.s.avg = mean(co2.sum))
+
+# get max co2 produced for individual system processes 95th st 2022
+co2.process.95 <- system.parameters.95 %>%
+  group_by(system) %>%
+  summarise(co2.p.max = max(process.co2),
+            co2.p.avg = mean(process.co2)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join co2 produced summary tibbles 95th st 2022
+co2.summary.95 <- left_join(co2.system.95, co2.process.95, by = "system")
+```
+
+``` {r FacilityCo2ProducedTable95, ft.align = "center"}
+
+co2.facility.95 %>%
+  flextable() %>%
+  set_header_labels(co2.s.max = "Max Loading", co2.s.avg = "Avg Loading") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Facility CO", as_sub("2"), " loading (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r Co2ProducedTable95, ft.align = "center"}
+
+co2.process.95 %>%
+  flextable() %>%
+  set_header_labels(system = "System", co2.p.max = "Max Loading", co2.p.avg = "Avg Loading") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 System CO", as_sub("2"), " loading (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 95^th^ st. 2023
+
+``` {r co2_produced_primo}
+
+# get max co2 produced for each system 95th st 2023 (overlapping batches where appropriate)
+co2.system.primo <- system.parameters.primo %>%
+  group_by(system, facility_day) %>%
+  summarise(co2.sum = sum(total.co2)) %>%
+  summarise(co2.s.max = max(co2.sum),
+            co2.s.avg = mean(co2.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore above and calculate facility figure
+co2.facility.primo <- system.parameters.primo %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(co2.sum = sum(total.co2)) %>%
+  summarise(co2.s.max = max(co2.sum),
+            co2.s.avg = mean(co2.sum))
+
+# get max co2 produced for individual system processes 95th st 2023
+co2.process.primo <- system.parameters.primo %>%
+  group_by(system) %>%
+  summarise(co2.p.max = max(process.co2),
+            co2.p.avg = mean(process.co2)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join co2 produced summary tibbles 95th st 2023
+co2.summary.primo <- left_join(co2.system.primo, co2.process.primo, by = "system")
+```
+
+``` {r FacilityCo2ProducedTablePrimo, ft.align = "center"}
+
+co2.facility.primo %>%
+  flextable() %>%
+  set_header_labels(co2.s.max = "Max Loading", co2.s.avg = "Avg Loading") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 Facility CO", as_sub("2"), " loading (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r Co2ProducedTablePrimo, ft.align = "center"}
+
+co2.process.primo %>%
+  flextable() %>%
+  set_header_labels(system = "System", co2.p.max = "Max Loading", co2.p.avg = "Avg Loading") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2023 System CO", as_sub("2"), " loading (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+### 101^st^ st. 2024
+
+``` {r co2_produced_101}
+
+# get max co2 produced for each system 101th st 2024 (overlapping batches where appropriate)
+co2.system.101 <- system.parameters.101 %>%
+  group_by(system, facility_day) %>%
+  summarise(co2.sum = sum(total.co2)) %>%
+  summarise(co2.s.max = max(co2.sum),
+            co2.s.avg = mean(co2.sum)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# ignore above and calculate facility figure
+co2.facility.101 <- system.parameters.101 %>%
+  filter(!system == "quarantine") %>%
+  group_by(facility_day) %>%
+  summarise(co2.sum = sum(total.co2)) %>%
+  summarise(co2.s.max = max(co2.sum),
+            co2.s.avg = mean(co2.sum))
+
+# get max co2 produced for individual system processes 101st st 2024 4 raceway batch
+co2.process.101a <- system.parameters.101 %>%
+  filter(batch == "lag.batch.0") %>%
+  group_by(system) %>%
+  summarise(co2.p.max.a = max(process.co2),
+            co2.p.avg.a = mean(process.co2)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# get max co2 produced for individual system processes 101st st 2024 6 raceway batch
+co2.process.101b <- system.parameters.101 %>%
+  filter(batch == "lag.batch.1") %>%
+  group_by(system) %>%
+  summarise(co2.p.max.b = max(process.co2),
+            co2.p.avg.b = mean(process.co2)) %>%
+  arrange(factor(system, levels = c("quarantine", "nursery", "juvenile", "growout", "depurate")))
+
+# join co2 produced summary tibbles 101st st 2024
+co2.summary.101 <- left_join(co2.process.101a, co2.process.101b, by = "system")
+```
+
+``` {r FacilityCo2ProducedTable101, ft.align = "center"}
+
+co2.facility.101 %>%
+  flextable() %>%
+  set_header_labels(co2.s.max = "Max Loading", co2.s.avg = "Avg Loading") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 Facility CO", as_sub("2"), " loading (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r Co2ProducedTable101, ft.align = "center"}
+
+co2.summary.101 %>%
+  flextable() %>%
+  set_header_labels(system = "System", co2.p.max.a = "Max Loading A", co2.p.avg.a = "Avg Loading A", co2.p.max.b = "Max Loading B", co2.p.avg.b = "Avg Loading B") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("101", as_sup("st"), " st. 2024 System CO", as_sub("2"), " loading (Kg/day)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+Flow requirements to maintain CO~2~ levels at a maximum of 10mg/l (for pH values above 7.5 with alkalinity ~ 150 mg/l, no degassing required, aeration expected to prevent buildup of CO~2~) 
+
+### 95^th^ st. 2022
+
+``` {r co2_flow_95}
+
+# get flow requirement to degas tanks 95th st 2022
+co2.flow.95 <- system.parameters.95 %>%
+  mutate(c02.flow = abs(process.co2 * 1e6 / (co2.c2 - co2.c1) / 24 / 1000))
+```
+
+``` {r Co2FlowPlot95, fig.cap = "95^th^ st. 2022 System flow rate required to degas CO~2~ to 10 mg/l.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot co2 flow requirement across batch run 95th st 2022
+tank.co2.95 <- co2.flow.95 %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, c02.flow, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Day", y = expression(paste("Flow to maintain ", CO[2], " at 10 mg/l ", (m^3/hr)))) + 
+  theme_minimal()
+
+tank.co2.95
+```
+
+### 95^th^ st. 2023
+
+``` {r co2_flow_primo}
+
+# get flow requirement to degas tanks 95th st 2023
+co2.flow.primo <- system.parameters.primo %>%
+  mutate(c02.flow = abs(process.co2 * 1e6 / (co2.c2 - co2.c1) / 24 / 1000))
+```
+
+``` {r Co2FlowPlotPrimo, fig.cap = "95^th^ st. 2023 System flow rate required to degas CO~2~ to 10 mg/l.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot co2 flow requirement across batch run 95th st 2023
+tank.co2.primo <- co2.flow.primo %>%
+  filter(batch == "lag.batch.0") %>%
+  ggplot(aes(batch_day, c02.flow, color = system)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("quarantine", "nursery", "juvenile", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery", "Juvenile", "Growout", "Depurate")) +
+  labs(x = "Day", y = expression(paste("Flow to maintain ", CO[2], " at 10 mg/l ", (m^3/hr)))) + 
+  theme_minimal()
+
+tank.co2.primo
+```
+
+### 101^st^ st. 2024
+
+``` {r co2_flow_101}
+
+# get flow requirement to degas tanks 101st st 2024
+co2.flow.101 <- system.parameters.101 %>%
+  mutate(c02.flow = abs(process.co2 * 1e6 / (co2.c2 - co2.c1) / 24 / 1000))
+```
+
+``` {r Co2FlowPlot101, fig.cap = "101^st^ st. 2024 System flow rate required to degas CO~2~ to 10 mg/l.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot co2 flow requirement across batch run 101st st 2024
+tank.co2.101 <- co2.flow.101 %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.1")) %>%
+  ggplot(aes(facility_day, c02.flow, color = system)) +
+  geom_line()+
+  facet_wrap(~batch, ncol = 1, labeller = as_labeller(batch.names)) +
+  scale_color_manual("", breaks = c("quarantine", "nursery", "growout", "depurate"),
+                     values = c(system_cols),
+                     labels = c("Quarantine", "Nursery","Growout", "Depurate")) +
+  labs(x = "Day", y = expression(paste("Flow to maintain ", CO[2], " at 10 mg/l ", (m^3/hr)))) + 
+  theme_minimal()
+
+tank.co2.101
+```
+
+***
+
+# Summary Charts of Water Chemsitry Data RW4 95^th^ st. 2022
+
+```{r water_chem_data_import}
+
+# import data
+water_chem <- read.csv("data/water_chem.csv")
+
+rainfall <- read.csv("data/rain_aet.csv") %>%
+  mutate(date = as.Date(date))
+
+primo.water <- read.csv("data/primo_water_21.csv")
+```
+
+``` {r water_chem_data_clean}
+
+# clean up spreadsheet
+water_chem <- water_chem %>%
+  mutate(DATE = as.Date(DATE, origin = "1899-12-30"),
+         pH = as.numeric(str_replace(pH, "-", "")),
+         Tempmax = str_replace(Tempmax, "-", ""),
+         Tempmax = as.numeric(str_replace(Tempmax, ",", ".")),
+         Feed = as.numeric(str_remove_all(Feed, "[:alpha:]|\\s")),
+         Solids = as.numeric(str_remove_all(Solids, "[:alpha:]|\\s|\\(|\\)|\\-")),
+         Settling.Tank = str_to_lower(Settling.Tank),
+         Foam.Level = as.numeric(str_remove_all(Foam.Level, "[:alpha:]|\\/|\\s")))
+```
+
+``` {r water_chem_data_mutate}
+
+# mutate some useful parameters
+water_chem_4 <- water_chem %>%
+  filter(DATE > "2021-12-31") %>%
+  mutate(batch = case_when(DATE < "2022-02-17" ~ "batch_1",
+                           DATE >= "2022-02-17" & DATE <= "2022-08-18" ~ "batch_2",
+                           DATE >= "2022-08-20" & DATE <= "2022-11-30" ~ "batch_3"),
+         total.feed = Feed * 8,
+         Nitrite = case_when(Nitrite > 100 ~ Nitrite / 1000,
+                             TRUE ~ Nitrite),
+         pH = replace(pH, pH > 14, NA_real_),
+         Settling.Tank = case_when(Settling.Tank == "no" ~ 0,
+                                   Settling.Tank == "yes" ~ 1,
+                                   TRUE ~ 0),
+         pka = 0.0901821 + 2729.92/(Tempmin + 273.15),
+         ionic.strength = 19.9273 * Salinity / (1000 - 1.005109 * Salinity),
+         pkas = pka + (0.1552 - 0.000314 * Tempmin) * ionic.strength,
+         mole.fraction = 1 / (1 + 10^(pkas - pH)),
+         free.ammonia = TAN * mole.fraction)
+
+
+```
+
+## TAN Levels RW4 2022
+
+``` {r rw4Tan, fig.cap = "TAN levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot TAN
+rw_4_tan <- water_chem_4 %>%
+  ggplot(aes(DATE, TAN, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "TAN (mg/l)") + 
+  theme_minimal()
+
+rw_4_tan
+```
+
+Comments: Sub-optimal variation in TAN levels, indication of variable rate of ammonia removal. Majority of time TAN is within acceptable level < 1.0 mg/l. Consider organic carbon addition according to feed protein loading to maintain a steady state carbon source for bacteria to process ammonia. 
+
+## Unionised Ammonia
+
+``` {r rw4ammonia, fig.cap = "Free ammonia levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot free ammonia
+rw_4_free.nh4 <- water_chem_4 %>%
+  ggplot(aes(DATE, free.ammonia, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Free Ammonia (mg/l)") + 
+  theme_minimal()
+
+rw_4_free.nh4
+```
+
+Comments: High variability in level of unionised ammonia. Influenced by both TAN and pH. Instances of levels exceeding 0.3mg/l, majority of time within acceptable range.
+
+## Nitrite RW4 2022
+
+``` {r rw4Nitrite, fig.cap = "Nitrite levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot nitrite
+rw_4_nit <- water_chem_4 %>%
+  ggplot(aes(DATE, Nitrite, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Nitrite (mg/l)") + 
+  theme_minimal()
+
+rw_4_nit
+```
+
+Comments. For a heterotrophic managed nitrogen removal system, production of nitrite expected to be low (realistically a small proportion of ammonia will be converted to nitrite and nitrate by the autotrophic pathway). Management of optimal C:N ratio and solids removal to optimise heterotrophic domination of ammonia removal.
+
+## Alkalinity RW4 2022
+
+``` {r rw4Alk, fig.cap = "Alkalinity levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot Alk
+rw_4_alk <- water_chem_4 %>%
+  ggplot(aes(DATE, ALK, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Alkalinity (mg/l)") + 
+  theme_minimal()
+
+rw_4_alk
+```
+
+Comments: Alkalinity appears to be well managed.
+
+## pH RW4 2022
+
+``` {r rw4ph, fig.cap = "pH levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot pH
+rw_4_ph <- water_chem_4 %>%
+  ggplot(aes(DATE, pH, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "pH") + 
+  theme_minimal()
+
+rw_4_ph
+```
+
+Comments: High variability in pH level (bearing in mind pH is an on exponential scale). pH influences proportion of unionised:ionised ammonia. Consider pH management techniques (alkalinity & pH dosing system)
+
+## Salinity RW4 2022
+
+``` {r rw4Salinity, fig.cap = "Salinity levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot salinity
+rw_4_sal <- water_chem_4 %>%
+  ggplot(aes(DATE, Salinity, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Salinity (ppt)") + 
+  theme_minimal()
+
+rw_4_sal
+```
+
+Comments: Salinity appears to be well managed
+
+## Dissolved Oxygen RW4 2022
+
+``` {r rw4Oxygen, fig.cap = "Dissolved oxygen levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot DO
+rw_4_do <- water_chem_4 %>%
+  ggplot(aes(DATE, DOmin, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "DO min (mg/l)") + 
+  theme_minimal()
+
+rw_4_do
+```
+
+Comments: Oxygen levels appear to be higher during the first half of the production year. All values within acceptable range > 5mg/l
+
+## Solids RW4 2022
+
+``` {r rw4Solids, fig.cap = "Solids levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot solids
+rw_4_solids <- water_chem_4 %>%
+  ggplot(aes(DATE, Solids, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Solids (ml)") + 
+  theme_minimal()
+
+rw_4_solids
+```
+
+Comments: High range of solids variability. Lack of knowledge on how to interpret volume of solids in imhoff cone in terms of TSS. Further sample analysis required to achieve this and then define an acceptable operating range. 
+
+## Settling Tank Operation RW4 2022
+
+``` {r rw4Settling, fig.cap = "Settling tank operation in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot settling tank
+rw_4_settling <- water_chem_4 %>%
+  ggplot(aes(DATE, Settling.Tank, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Settling Tank (1/0)") + 
+  theme_minimal()
+
+rw_4_settling
+```
+
+Comments : During 2022 the settling tank in RW4 was operated for a total of `r sum(water_chem_4$Settling.Tank)` days from a production period of `r length(water_chem_4$Settling.Tank)` days. Total discharge water from this settling tank was `r sum(water_chem_4$Settling.Tank) * 2` m^3^. Average water use for solids removal from RW4 `r format(sum(water_chem_4$Settling.Tank) * 2 / length(water_chem_4$Settling.Tank), digits = 3)` m^3^/day. 
+
+Settling tank operation appears to be determined by reaching a maximum permitted level of solids in the imhoff cone. Suggest optimisation by having a smaller permitted range of solids, achieve by more frequent use of settling vessel (consider volume and flow rate accordingly). Pumping water into a settling tank will incur mechanical disruption, reduce particle size and efficiency of settlement device - avoid unless unfeasible.Decrease inlet water velocity as far as possible, without permitting settlement within pipework. Density of waste should be determined for correct calculation of settlement rate/ flow in settlement tank.
+
+## Total Feed Input RW4 2022
+
+``` {r rw4Feed, fig.cap = "Total daily feed input in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot total feed
+rw_4_feed <- water_chem_4 %>%
+  ggplot(aes(DATE, total.feed / 1000, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Total Feed (kg)") + 
+  theme_minimal()
+
+rw_4_feed
+```
+
+## Estimated Nitrate levels bsed on cumulative Nitrite calculation
+
+``` {r rw4_cumulative_nitrate}
+
+# estimate cumulative nitrate based on nitrite production
+cumulative.nitrate.95 <- water_chem_4 %>%
+  mutate(total.volume = raceway.tank * 1000 * Water.Level / 36,
+         total.nitrite = Nitrite * total.volume) %>%
+  group_by(batch) %>%
+  mutate(cs = cumsum(total.nitrite),
+         cumulative.nitrate = cs / total.volume)
+```
+
+``` {r rw4Nitrate, fig.cap = "Estimated nitrate levels in RW 4 2022.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+# plot cumulative nitrate
+rw_4_nitrate <- cumulative.nitrate.95 %>%
+  ggplot(aes(DATE, cumulative.nitrate, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Cumulative Nitrate (mg/l)") + 
+  theme_minimal()
+
+rw_4_nitrate
+```
+
+Comments: Accumulation of nitrate has been calculated based on assumption of water discharged at end of a batch. Under these conditions nitrate appears to remain within acceptable levels. Consider periodic monitoring of nitrate to confirm this.
+
+## Rainfall / Evapo-transpiration Blue Cypress Lake
+
+``` {r RainfallPlot, fig.cap = "Mean monthly precipitation/ evapo-transpiration rates for Blue Cypress Lake, Florida, USA.", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+# custom color
+rain.cols <- c(rainfall = "#a6bddb", aet = "#045a8d")
+
+rainfall %>%
+  ggplot(aes(date, measure_in, color = condition)) +
+  geom_line() +
+  scale_color_manual("", breaks = c("rainfall", "aet"),
+                     values = c(rain.cols),
+                     labels = c("Rainfall", "AET")) +
+  labs(x = "Date", y = "Precipitation/ Evapo-transpiration (Inches)") + 
+  theme_minimal()
+```
+
+Comments: Generally, precipitation greater than evapotranspiration - not favourable for removal of discharge water by evaporation.
+
+## 95^th^ st. 2022 Water Budget
+
+``` {r water_budget_2022}
+
+# set production period to two growth periods to observe system loading
+prod.plan_water <- data.frame(facility_day = seq(0, 365 - 1)) %>%
+  mutate(batch_1 = case_when(facility_day < 365 ~ facility_day))
+
+for (lag_size in c(0:12)) {
+  
+  new_col_name <- paste0("lag.batch.", lag_size)
+  
+  prod.plan_water <- prod.plan_water %>%
+    mutate(!!sym(new_col_name) := lag(batch_1, n = lag_size * batch_frequency, default = NA))
+}
+
+# remove column called batch_1
+prod.plan.water <- prod.plan_water %>% select(-batch_1) %>%
+  pivot_longer(c(lag.batch.0:lag.batch.12), names_to = "batch", values_to = "batch_day", values_drop_na = TRUE) %>%
+  mutate(system = case_when(batch_day %in% c(0:quarantine.period) ~ "quarantine",
+                            batch_day %in% c(quarantine.period + 1: nursery.period) ~ "nursery",
+                            batch_day %in% c(quarantine.period + nursery.period + 1 : juvenile.period) ~ "juvenile",
+                            batch_day %in% c(quarantine.period + nursery.period + juvenile.period + 1 : growout.period) ~ "growout",
+                            batch_day %in% c(quarantine.period + nursery.period + juvenile.period + growout.period + 1 : depuration.period)  ~ "depurate",
+                            TRUE ~ "harvested")) %>%
+  drop_na() %>%
+  filter(batch %in% c("lag.batch.0", "lag.batch.2", "lag.batch.5", "lag.batch.7", "lag.batch.10")) %>%
+  mutate(water.management = case_when(batch_day == 29 ~ nursery.tank * nursery.system.division,
+                                      batch_day == 59 ~ raceway.tank - nursery.tank * nursery.system.division,
+                                      batch_day == 89 ~ raceway.tank,
+                                      batch_day == 151 ~ raceway.tank * growout.system.division * 0.1,
+                                      batch_day == 165 ~ raceway.tank * growout.system.division * 0.1,
+                                      batch_day == 167 ~ purging.unit,
+                                      batch_day == 169 ~ packing.volume * growout.system.division,
+                                      batch_day == 179 ~ raceway.tank * growout.system.division * 0.1,
+                                      batch_day == 183 ~ packing.volume * growout.system.division,
+                                      batch_day == 193 ~ raceway.tank * growout.system.division * 0.1,
+                                      batch_day == 199 ~ 53 /3 * 2 * growout.system.division,
+                                      TRUE ~ 0),
+         water.management = case_when(facility_day == 32 & batch == "lag.batch.0" ~ 198,
+                                      facility_day == 62  & batch == "lag.batch.0" ~ 152,
+                                      facility_day == 90  & batch == "lag.batch.0" ~ 152,
+                                      facility_day == 120  & batch == "lag.batch.0" ~ 198,
+                                      facility_day == 150  & batch == "lag.batch.0" ~ 213,
+                                      facility_day == 180  & batch == "lag.batch.0" ~ 182,
+                                      facility_day == 212  & batch == "lag.batch.0" ~ 198,
+                                      facility_day == 242  & batch == "lag.batch.0" ~ 213,
+                                      facility_day == 272  & batch == "lag.batch.0" ~ 213,
+                                      facility_day == 304  & batch == "lag.batch.0" ~ 152,
+                                      facility_day == 334  & batch == "lag.batch.0" ~ 236,
+                                      facility_day == 364  & batch == "lag.batch.0" ~ 220,
+                                      TRUE ~ water.management),
+         water.designation = case_when(facility_day == 32 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 62 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 90 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 120 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 150 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 180 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 212 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 242 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 272 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 304 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 334 & batch == "lag.batch.0" ~ "delivery",
+                                       facility_day == 364 & batch == "lag.batch.0" ~ "delivery",
+                                       TRUE ~ "required"),
+         water.management.drum = case_when(batch_day == 29 ~ nursery.tank * nursery.system.division,
+                                           batch_day == 59 ~ raceway.tank - nursery.tank * nursery.system.division,
+                                           batch_day == 61 ~ as.numeric(drum.sum.95[2,2]) * nursery.system.division,
+                                           batch_day == 89 ~ raceway.tank,
+                                           batch_day == 91 ~ as.numeric(drum.sum.95[3,2]) * juvenile.system.division,
+                                           batch_day == 151 ~ raceway.tank * growout.system.division * 0.1,
+                                           batch_day == 165 ~ raceway.tank * growout.system.division * 0.1,
+                                           batch_day == 167 ~ purging.unit,
+                                           batch_day == 169 ~ packing.volume * growout.system.division,
+                                           batch_day == 179 ~ raceway.tank * growout.system.division * 0.1,
+                                           batch_day == 183 ~ packing.volume * growout.system.division,
+                                           batch_day == 193 ~ raceway.tank * growout.system.division * 0.1,
+                                           batch_day == 201 ~ as.numeric(drum.sum.95[4,2]) * growout.system.division,
+                                           TRUE ~ 0),
+         water.management.drum = case_when(facility_day == 32 & batch == "lag.batch.0" ~ 198,
+                                      facility_day == 62  & batch == "lag.batch.0" ~ 152,
+                                      facility_day == 90  & batch == "lag.batch.0" ~ 152,
+                                      facility_day == 120  & batch == "lag.batch.0" ~ 198,
+                                      facility_day == 150  & batch == "lag.batch.0" ~ 213,
+                                      facility_day == 180  & batch == "lag.batch.0" ~ 182,
+                                      facility_day == 212  & batch == "lag.batch.0" ~ 198,
+                                      facility_day == 242  & batch == "lag.batch.0" ~ 213,
+                                      facility_day == 272  & batch == "lag.batch.0" ~ 213,
+                                      facility_day == 304  & batch == "lag.batch.0" ~ 152,
+                                      facility_day == 334  & batch == "lag.batch.0" ~ 236,
+                                      facility_day == 364  & batch == "lag.batch.0" ~ 220,
+                                      TRUE ~ water.management.drum))
+```
+
+### Summary of Water Use 2022
+
+``` {r water_use_2022}
+
+# from water production plan summarise delivered water verses expected requirements
+water.use.2022 <- prod.plan.water %>%
+  group_by(facility_day) %>%
+  group_by(water.designation) %>%
+  summarise(water.sum = sum(water.management))
+```
+
+``` {r WaterUse2022, ft.align = "center"}
+
+water.use.2022 %>%
+  flextable() %>%
+  set_header_labels(water.designation = "Status", water.sum = "Volume") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Facility saltwater budget (m", as_sup("3"), " /year)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r water_projection_drum_2022}
+
+# from water production plan summarise delivered water verses expected requirements if a drum filter were used instead of settlement tank
+water.use.drum.2022 <- prod.plan.water %>%
+  group_by(facility_day) %>%
+  group_by(water.designation) %>%
+  summarise(water.sum.drum = sum(water.management.drum))
+```
+
+``` {r WaterProjectionTable, ft.align = "center"}
+
+water.use.drum.2022 %>%
+  flextable() %>%
+  set_header_labels(water.designation = "Status", water.sum.drum = "Volume") %>%
+  colformat_double(digits = 2) %>%
+  autofit() %>%
+  fit_to_width(7.5) %>%
+set_caption(caption = as_paragraph("95", as_sup("th"), " st. 2022 Projected Facility saltwater budget (with drum filter use) (m", as_sup("3"), " /year)."), 
+  style = "Table Caption", 
+  autonum = run_autonum(seq_id = "tab"))
+```
+
+``` {r cumulative_water_budget_2022}
+
+# cumulative sum of water requirements and water delivered
+prod.plan.water.cs <- prod.plan.water %>%
+  group_by(water.designation) %>%
+  mutate(water.cs = cumsum(water.management))
+```
+
+``` {r CumulativeWaterBudgetPlot2022, fig.cap = "Cumulative water delivery and expected water requirements 95^th^ st. 2022", fig.align = "center", fig.dim = c(8,3), dpi = 200}
+
+
+water.budget.plot.2022 <- prod.plan.water.cs %>%
+  ggplot(aes(facility_day, water.cs, color = water.designation)) +
+  geom_line() +
+  scale_color_manual("", breaks = c("delivery", "used"),
+                     values = c("#d0d1e6", "#74a9cf"),
+                     labels = c("Delivery", "Used")) +
+  labs(x = "Day", y = expression(paste("Water Volume ", (m^3)))) + 
+  theme_minimal()
+
+water.budget.plot.2022
+```
+
+Total discharge water 2022 (95^th^ st. delivered to 101^st^ st) 798 m^3^
+
+Comments: Water requirement appears to follow same gradient as water delivery. Discharge water volume appears to be low in comparison to water delivered/ used. Confirm.
+
+

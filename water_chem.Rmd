@@ -1,0 +1,280 @@
+---
+title: "Water Chemistry"
+author: "AES Technical"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r libraries}
+# import libraries
+library(tidyverse)
+library(broom)
+library(kableExtra)
+```
+
+## Summary Charts of Water Chemsitry Data RW4 95^th^ st. 2022
+
+```{r data_import}
+
+# import data
+water_chem <- read.csv("data/water_chem.csv")
+
+rainfall <- read.csv("data/rain_aet.csv") %>%
+  mutate(date = as.Date(date))
+
+primo.water <- read.csv("data/primo_water_21.csv")
+```
+
+``` {r data_clean}
+
+# clean up spreadsheet
+water_chem <- water_chem %>%
+  mutate(DATE = as.Date(DATE, origin = "1899-12-30"),
+         pH = as.numeric(str_replace(pH, "-", "")),
+         Tempmax = str_replace(Tempmax, "-", ""),
+         Tempmax = as.numeric(str_replace(Tempmax, ",", ".")),
+         Feed = as.numeric(str_remove_all(Feed, "[:alpha:]|\\s")),
+         Solids = as.numeric(str_remove_all(Solids, "[:alpha:]|\\s|\\(|\\)|\\-")),
+         Settling.Tank = str_to_lower(Settling.Tank),
+         Foam.Level = as.numeric(str_remove_all(Foam.Level, "[:alpha:]|\\/|\\s")))
+```
+
+``` {r data_mutate}
+
+# mutate some useful parameters
+water_chem_4 <- water_chem %>%
+  filter(DATE > "2021-12-31") %>%
+  mutate(batch = case_when(DATE < "2022-02-17" ~ "batch_1",
+                           DATE >= "2022-02-17" & DATE <= "2022-08-18" ~ "batch_2",
+                           DATE >= "2022-08-20" & DATE <= "2022-11-30" ~ "batch_3"),
+         total.feed = Feed * 8,
+         Nitrite = case_when(Nitrite > 100 ~ Nitrite / 1000,
+                             TRUE ~ Nitrite),
+         pH = replace(pH, pH > 14, NA_real_),
+         Settling.Tank = case_when(Settling.Tank == "no" ~ 0,
+                                   Settling.Tank == "yes" ~ 1,
+                                   TRUE ~ 0))
+
+
+```
+
+## TAN
+
+``` {r tan, fig.cap = "TAN levels in RW 4 2022.", fig.align = "center"}
+
+# plot TAN
+rw_4_tan <- water_chem_4 %>%
+  ggplot(aes(DATE, TAN, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "TAN (mg/l)") + 
+  theme_minimal()
+
+rw_4_tan
+```
+
+## Nitrite
+
+``` {r nitrite, fig.cap = "Nitrite levels in RW 4 2022.", fig.align = "center"}
+
+# plot nitrite
+rw_4_nit <- water_chem_4 %>%
+  ggplot(aes(DATE, Nitrite, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Nitrite (mg/l)") + 
+  theme_minimal()
+
+rw_4_nit
+```
+
+## Alkalinity
+
+``` {r alk, fig.cap = "Alkalinity levels in RW 4 2022.", fig.align = "center"}
+
+# plot Alk
+rw_4_alk <- water_chem_4 %>%
+  ggplot(aes(DATE, ALK, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Alkalinity (mg/l)") + 
+  theme_minimal()
+
+rw_4_alk
+```
+
+## pH
+
+``` {r ph, fig.cap = "pH levels in RW 4 2022.", fig.align = "center"}
+
+# plot pH
+rw_4_ph <- water_chem_4 %>%
+  ggplot(aes(DATE, pH, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "pH") + 
+  theme_minimal()
+
+rw_4_ph
+```
+
+## Salinity
+
+``` {r salinity, fig.cap = "Salinity levels in RW 4 2022.", fig.align = "center"}
+
+# plot salinity
+rw_4_sal <- water_chem_4 %>%
+  ggplot(aes(DATE, Salinity, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Salinity (ppt)") + 
+  theme_minimal()
+
+rw_4_sal
+```
+
+## Dissolved Oxygen
+
+``` {r oxygen, fig.cap = "Dissolved oxygen levels in RW 4 2022.", fig.align = "center"}
+
+# plot DO
+rw_4_do <- water_chem_4 %>%
+  ggplot(aes(DATE, DOmin, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "DO min (mg/l)") + 
+  theme_minimal()
+
+rw_4_do
+```
+
+## Solids
+
+``` {r solids, fig.cap = "Solids levels in RW 4 2022.", fig.align = "center"}
+
+# plot solids
+rw_4_solids <- water_chem_4 %>%
+  ggplot(aes(DATE, Solids, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Solids (ml)") + 
+  theme_minimal()
+
+rw_4_solids
+```
+
+## Settling Tank Operation
+
+``` {r settling, fig.cap = "Settling tank operation in RW 4 2022.", fig.align = "center"}
+
+# plot settling tank
+rw_4_settling <- water_chem_4 %>%
+  ggplot(aes(DATE, Settling.Tank, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Settling Tank (1/0)") + 
+  theme_minimal()
+
+rw_4_settling
+```
+
+During 2022 the settling tank in RW4 was operated for a total of `r sum(water_chem_4$Settling.Tank)` days from a production period of `r length(water_chem_4$Settling.Tank)` days. Total discharge water from this settling tank was `r sum(water_chem_4$Settling.Tank) * 2` m^3^. Average water use for solids removal from RW4 `r format(sum(water_chem_4$Settling.Tank) * 2 / length(water_chem_4$Settling.Tank), digits = 3)` m^3^/day.
+
+## Total Feed Input
+
+``` {r feed, fig.cap = "Total daily feed input in RW 4 2022.", fig.align = "center"}
+
+# plot total feed
+rw_4_feed <- water_chem_4 %>%
+  ggplot(aes(DATE, total.feed / 1000, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Total Feed (kg)") + 
+  theme_minimal()
+
+rw_4_feed
+```
+
+## Estimated Nitrate levels bsed on cumulative Nitrite calculation
+
+``` {r cumulative_nitrate}
+
+# estimate cumulative nitrate based on nitrite production
+cumulative.nitrate.95 <- water_chem_4 %>%
+  mutate(total.volume = 90000 * Water.Level / 36,
+         total.nitrite = Nitrite * total.volume) %>%
+  group_by(batch) %>%
+  mutate(cs = cumsum(total.nitrite),
+         cumulative.nitrate = cs / total.volume)
+```
+
+``` {r nitrate, fig.cap = "Estimated nitrate levels in RW 4 2022.", fig.align = "center"}
+
+# plot cumulative nitrate
+rw_4_nitrate <- cumulative.nitrate.95 %>%
+  ggplot(aes(DATE, cumulative.nitrate, color = batch)) +
+  geom_line()+
+  scale_color_manual("", breaks = c("batch_1", "batch_2", "batch_3"),
+                     values = c("#d0d1e6", "#a6bddb", "#74a9cf"),
+                     labels = c("Batch 1", "Batch 2", "Batch 3")) +
+  labs(x = "Date", y = "Cumulative Nitrate (mg/l)") + 
+  theme_minimal()
+
+rw_4_nitrate
+```
+
+``` {r rainfall_plot, fig.cap = "Mean monthly precipitation/ evapo-transpiration rates for Blue Cypress Lake, Florida, USA.", fig.align = "center"}
+# custom color
+rain.cols <- c(rainfall = "#a6bddb", aet = "#045a8d")
+
+rainfall %>%
+  ggplot(aes(date, measure_in, color = condition)) +
+  geom_line() +
+  scale_color_manual("", breaks = c("rainfall", "aet"),
+                     values = c(rain.cols),
+                     labels = c("Rainfall", "AET")) +
+  labs(x = "Date", y = "Precipitation/ Evapo-transpiration (Inches)") + 
+  theme_minimal()
+```
+
+``` {r primo_water_21}
+
+primo.water.21 <- primo.water %>%
+  mutate(vol.cube = vol_gal / 0.26417205235815 / 1000)
+```
+
+``` {r primo_water_plot}
+month.order <- c("January", "February", "March", "April",
+                 "May", "June", "July", "August",
+                 "September", "October", "November", "December")
+
+primo.water.21 %>%
+  ggplot(aes(factor(Month), vol.cube)) +
+  geom_col(color = "#045a8d",fill =  "#a6bddb") +
+  scale_x_discrete(limits = month.order, labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) +
+  labs(x = "", y = "Monthly water demand (m^3)") + 
+  theme_minimal()
+```
+
